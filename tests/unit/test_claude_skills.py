@@ -268,3 +268,51 @@ class TestClaudeCli:
         payload = json.loads(result.output)
         assert payload["status"] == "already_initialized"
         assert {r["skill"] for r in payload["skills"]["results"]} == EXPECTED_SKILLS
+
+
+class TestFirstRunOffer:
+    """The one-time interactive offer to install user-level skills."""
+
+    @pytest.fixture
+    def interactive(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Simulate a terminal and redirect HOME so ~/.claude is isolated."""
+        import researchforge.cli as cli_module
+
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(cli_module, "_is_interactive", lambda: True)
+        return home
+
+    def test_yes_installs_user_skills_once(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, interactive: Path
+    ) -> None:
+        result = cli_runner.invoke(app, ["paths"], input="y\n")
+        assert "Install the Claude Code skills" in result.output
+        assert (interactive / ".claude" / "skills" / "researchforge-start").is_dir()
+
+        # Asked exactly once — the next command must not prompt again.
+        again = cli_runner.invoke(app, ["paths"], input="")
+        assert "Install the Claude Code skills" not in again.output
+
+    def test_no_records_answer_without_installing(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, interactive: Path
+    ) -> None:
+        result = cli_runner.invoke(app, ["paths"], input="n\n")
+        assert "researchforge claude install --user" in result.output
+        assert not (interactive / ".claude" / "skills").exists()
+        again = cli_runner.invoke(app, ["paths"], input="")
+        assert "Install the Claude Code skills" not in again.output
+
+    def test_not_a_terminal_never_prompts(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        result = cli_runner.invoke(app, ["paths"])
+        assert "Install the Claude Code skills" not in result.output
+
+    def test_existing_user_install_never_prompts(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, interactive: Path
+    ) -> None:
+        install_skills(user=True)
+        result = cli_runner.invoke(app, ["paths"], input="")
+        assert "Install the Claude Code skills" not in result.output

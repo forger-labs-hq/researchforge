@@ -82,6 +82,10 @@ def _root(
         with suppress(OSError):  # registry is best-effort bookkeeping
             touch_project(Path.cwd())
 
+    if ctx.invoked_subcommand not in ("claude", None):
+        with suppress(Exception):  # a convenience offer must never break a command
+            _offer_skills_once()
+
     if ctx.invoked_subcommand not in ("hub", "serve", None) and not os.environ.get(
         "RESEARCHFORGE_NO_HUB"
     ):
@@ -89,6 +93,46 @@ def _root(
 
         with suppress(Exception):  # the hub must never break a command
             ensure_hub()
+
+
+def _is_interactive() -> bool:
+    import sys
+
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _offer_skills_once() -> None:
+    """First interactive run: offer the user-level Claude skills install.
+
+    Consent-based and asked exactly once ever — the answer (either way) is
+    recorded so the CLI never nags. Skipped entirely when not on a terminal,
+    or when skills are already installed for this user or this project.
+    """
+    if not _is_interactive():
+        return
+    from researchforge.claude.installer import manifest_path
+    from researchforge.config.registry import researchforge_home
+
+    marker = researchforge_home() / "skills-offer-answered"
+    if marker.exists() or manifest_path(user=True).exists() or manifest_path().exists():
+        return
+    wanted = typer.confirm(
+        "Install the Claude Code skills for all sessions (~/.claude/skills), "
+        "so /researchforge-start works everywhere?",
+        default=True,
+    )
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(("yes" if wanted else "no") + "\n", encoding="utf-8")
+    if wanted:
+        from researchforge.claude.installer import install_skills
+
+        report = install_skills(user=True)
+        typer.echo(
+            f"Claude skills installed in {report.skills_dir} — open any Claude Code "
+            "session and try /researchforge-start."
+        )
+    else:
+        typer.echo("Skipped — run `researchforge claude install --user` anytime.")
 
 
 app.add_typer(project_app, name="project")

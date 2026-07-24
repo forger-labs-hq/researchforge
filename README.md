@@ -42,6 +42,9 @@ pip install "researchforge[serve]"       # or: pipx install "researchforge[serve
 researchforge claude install --user      # skills -> ~/.claude/skills/
 ```
 
+(Skip step 2 if you like — the first time you run `researchforge` in a
+terminal it offers this install with one keystroke, and never asks again.)
+
 That's the whole setup. Now open **any** Claude Code session and say what
 you want:
 
