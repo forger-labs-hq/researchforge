@@ -29,15 +29,15 @@ UserOption = typer.Option(
     help="Target ~/.claude/skills/ (every project on this machine) instead of this repository.",
 )
 
-_ACTION_MARKERS = {
-    SkillAction.INSTALLED: "+",
-    SkillAction.UPDATED: "^",
-    SkillAction.UNCHANGED: "=",
-    SkillAction.SKIPPED_MODIFIED: "!",
-    SkillAction.REMOVED: "-",
-    SkillAction.LEFT_MODIFIED: "!",
-    SkillAction.MISSING: "?",
-    SkillAction.MODIFIED: "!",
+_ACTION_STYLES: dict[SkillAction, tuple[str, str]] = {
+    SkillAction.INSTALLED: ("rf.success", "+"),
+    SkillAction.UPDATED: ("rf.accent", "↑"),
+    SkillAction.UNCHANGED: ("rf.muted", "="),
+    SkillAction.SKIPPED_MODIFIED: ("rf.warning", "!"),
+    SkillAction.REMOVED: ("rf.error", "−"),
+    SkillAction.LEFT_MODIFIED: ("rf.warning", "!"),
+    SkillAction.MISSING: ("rf.muted", "?"),
+    SkillAction.MODIFIED: ("rf.warning", "!"),
 }
 
 
@@ -45,8 +45,11 @@ def _echo_report(report: InstallReport, json_output: bool) -> None:
     if json_output:
         typer.echo(json.dumps(report.model_dump(), indent=2))
         return
+    from researchforge.utils.console import console
+
     for result in report.results:
-        typer.echo(f"{_ACTION_MARKERS[result.action]} {result.skill}: {result.action.value}")
+        style, marker = _ACTION_STYLES[result.action]
+        console.print(f"  [{style}]{marker}[/]  {result.skill}  [{style}]{result.action.value}[/]")
 
 
 @claude_app.command("install")
@@ -57,12 +60,14 @@ def install_command(
     report = install_skills(force=force, user=user)
     _echo_report(report, json_output)
     if not json_output:
+        from researchforge.utils.console import console
+
         if report.conflicts:
-            typer.echo(
-                "Some skills were modified after installation and were left untouched; "
-                "re-run with --force to overwrite them."
+            console.print(
+                "[rf.warning]![/] Some skills were modified after installation and were left "
+                "untouched; re-run with [bold]--force[/] to overwrite them."
             )
-        typer.echo(f"Skills directory: {report.skills_dir}")
+        console.print(f"  [rf.muted]→[/]  [rf.path]{report.skills_dir}[/]")
 
 
 @claude_app.command("uninstall")
@@ -73,10 +78,13 @@ def uninstall_command(
     report = uninstall_skills(force=force, user=user)
     _echo_report(report, json_output)
     if not json_output:
+        from researchforge.utils.console import console
+
         left = [r for r in report.results if r.action is SkillAction.LEFT_MODIFIED]
         if left:
-            typer.echo(
-                "Modified skills were left in place; re-run with --force to remove them too."
+            console.print(
+                "[rf.warning]![/] Modified skills were left in place; "
+                "re-run with [bold]--force[/] to remove them too."
             )
 
 

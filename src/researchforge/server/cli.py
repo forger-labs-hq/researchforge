@@ -160,8 +160,28 @@ def hub_command(
     foreground: Annotated[
         bool, typer.Option("--foreground", hidden=True, help="Internal: plain foreground run.")
     ] = False,
+    prune: Annotated[
+        bool,
+        typer.Option("--prune", help="Remove missing projects from the registry and exit."),
+    ] = False,
 ) -> None:
     """Run the hub: every project on this machine, in one read-only dashboard."""
+    if prune:
+        from researchforge.config.registry import prune_missing
+        from researchforge.utils.console import console
+
+        removed = prune_missing()
+        if removed:
+            for e in removed:
+                console.print(f"  [rf.error]−[/]  [rf.muted]{e.name}[/]  [rf.path]{e.path}[/]")
+            console.print(
+                f"[rf.success]✓[/] Removed [bold]{len(removed)}[/] missing project"
+                f"{'s' if len(removed) != 1 else ''} from the registry."
+            )
+        else:
+            console.print("[rf.muted]No missing projects to remove.[/]")
+        return
+
     if stop:
         stopped = stop_hub()
         if stopped is None:

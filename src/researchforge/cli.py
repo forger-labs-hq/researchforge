@@ -19,6 +19,7 @@ from researchforge.claude.cli import claude_app
 from researchforge.config.paths import is_initialized, researchforge_dir
 from researchforge.config.paths_cli import paths_command
 from researchforge.contract.cli import contract_app
+from researchforge.cursor.cli import cursor_app
 from researchforge.domain.project import Project, ProjectMode, ProjectStatus
 from researchforge.execution.cli import baseline_app
 from researchforge.experiments.cli import experiment_app, results_app, validate_command
@@ -40,7 +41,12 @@ app = typer.Typer(
     name="researchforge",
     no_args_is_help=True,
     add_completion=False,
-    help="From papers to proof.",
+    rich_markup_mode="rich",
+    help=(
+        "[bold #7C3AED]ResearchForge[/] — [#F59E0B]from papers to proof.[/]\n\n"
+        "Turns a research question or improve-repository goal into evidence: "
+        "papers \u2192 hypotheses \u2192 benchmarked experiments \u2192 a validated result."
+    ),
 )
 
 
@@ -125,14 +131,20 @@ def _offer_skills_once() -> None:
     marker.write_text(("yes" if wanted else "no") + "\n", encoding="utf-8")
     if wanted:
         from researchforge.claude.installer import install_skills
+        from researchforge.utils.console import console
 
         report = install_skills(user=True)
-        typer.echo(
-            f"Claude skills installed in {report.skills_dir} — open any Claude Code "
-            "session and try /researchforge-start."
+        console.print(
+            f"[rf.success]✓[/] Claude skills installed in [rf.path]{report.skills_dir}[/] — "
+            "open any Claude Code session and try [bold]/researchforge-start[/]."
         )
     else:
-        typer.echo("Skipped — run `researchforge claude install --user` anytime.")
+        from researchforge.utils.console import console
+
+        console.print(
+            "[rf.muted]Skipped — run[/] [bold]researchforge claude install --user[/] "
+            "[rf.muted]anytime.[/]"
+        )
 
 
 app.add_typer(project_app, name="project")
@@ -153,7 +165,139 @@ app.command("paths")(paths_command)
 app.add_typer(ship_app, name="ship")
 app.add_typer(paper_app, name="paper")
 app.add_typer(claude_app, name="claude")
+app.add_typer(cursor_app, name="cursor")
 app.add_typer(analytics_app, name="analytics")
+
+# ---------------------------------------------------------------------------
+# `researchforge all` — install / uninstall / status for both IDE integrations
+# ---------------------------------------------------------------------------
+
+all_app = typer.Typer(
+    name="all",
+    no_args_is_help=True,
+    help="Manage Claude Code skills and Cursor rules together.",
+)
+
+
+@all_app.command("install")
+def all_install_command(
+    force: bool = typer.Option(False, "--force", help="Overwrite files modified after install."),
+    user: bool = typer.Option(
+        False,
+        "--user",
+        help="Install into ~/.claude/skills/ and ~/.cursor/rules/ (machine-wide).",
+    ),
+    json_output: JsonOption = False,
+) -> None:
+    """Install both Claude Code skills and Cursor rules."""
+    import json as _json
+
+    from researchforge.claude.installer import install_skills
+    from researchforge.cursor.installer import install_rules
+
+    claude_report = install_skills(force=force, user=user)
+    cursor_report = install_rules(force=force, user=user)
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {"claude": claude_report.model_dump(), "cursor": cursor_report.model_dump()},
+                indent=2,
+            )
+        )
+        return
+    from rich.rule import Rule
+
+    from researchforge.claude.cli import _echo_report as _echo_claude
+    from researchforge.cursor.cli import _echo_report as _echo_cursor
+    from researchforge.utils.console import console
+
+    console.print(Rule("[rf.primary]Claude Code Skills[/]", style="#6B21A8"))
+    _echo_claude(claude_report, False)
+    console.print(f"  [rf.muted]→[/]  [rf.path]{claude_report.skills_dir}[/]")
+    console.print()
+    console.print(Rule("[rf.primary]Cursor Rules[/]", style="#6B21A8"))
+    _echo_cursor(cursor_report, False)
+    console.print(f"  [rf.muted]→[/]  [rf.path]{cursor_report.rules_dir}[/]")
+
+
+@all_app.command("uninstall")
+def all_uninstall_command(
+    force: bool = typer.Option(False, "--force", help="Remove files modified after install."),
+    user: bool = typer.Option(
+        False,
+        "--user",
+        help="Uninstall from ~/.claude/skills/ and ~/.cursor/rules/ (machine-wide).",
+    ),
+    json_output: JsonOption = False,
+) -> None:
+    """Uninstall both Claude Code skills and Cursor rules."""
+    import json as _json
+
+    from researchforge.claude.installer import uninstall_skills
+    from researchforge.cursor.installer import uninstall_rules
+
+    claude_report = uninstall_skills(force=force, user=user)
+    cursor_report = uninstall_rules(force=force, user=user)
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {"claude": claude_report.model_dump(), "cursor": cursor_report.model_dump()},
+                indent=2,
+            )
+        )
+        return
+    from rich.rule import Rule
+
+    from researchforge.claude.cli import _echo_report as _echo_claude
+    from researchforge.cursor.cli import _echo_report as _echo_cursor
+    from researchforge.utils.console import console
+
+    console.print(Rule("[rf.primary]Claude Code Skills[/]", style="#6B21A8"))
+    _echo_claude(claude_report, False)
+    console.print()
+    console.print(Rule("[rf.primary]Cursor Rules[/]", style="#6B21A8"))
+    _echo_cursor(cursor_report, False)
+
+
+@all_app.command("status")
+def all_status_command(
+    user: bool = typer.Option(
+        False,
+        "--user",
+        help="Check ~/.claude/skills/ and ~/.cursor/rules/ (machine-wide).",
+    ),
+    json_output: JsonOption = False,
+) -> None:
+    """Show install status for both Claude Code skills and Cursor rules."""
+    import json as _json
+
+    from researchforge.claude.installer import skills_status
+    from researchforge.cursor.installer import rules_status
+
+    claude_report = skills_status(user=user)
+    cursor_report = rules_status(user=user)
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {"claude": claude_report.model_dump(), "cursor": cursor_report.model_dump()},
+                indent=2,
+            )
+        )
+        return
+    from rich.rule import Rule
+
+    from researchforge.claude.cli import _echo_report as _echo_claude
+    from researchforge.cursor.cli import _echo_report as _echo_cursor
+    from researchforge.utils.console import console
+
+    console.print(Rule("[rf.primary]Claude Code Skills[/]", style="#6B21A8"))
+    _echo_claude(claude_report, False)
+    console.print()
+    console.print(Rule("[rf.primary]Cursor Rules[/]", style="#6B21A8"))
+    _echo_cursor(cursor_report, False)
+
+
+app.add_typer(all_app, name="all")
 
 
 @app.command()
@@ -164,11 +308,31 @@ def doctor(json_output: JsonOption = False) -> None:
     if json_output:
         typer.echo(json.dumps([r.model_dump() for r in results], indent=2))
     else:
+        from rich.table import Table
+
+        from researchforge.utils.console import console
+
+        table = Table(box=None, padding=(0, 2, 0, 0), show_header=False, show_edge=False)
+        table.add_column(width=3)
+        table.add_column(min_width=16)
+        table.add_column()
         for result in results:
-            marker = "✓" if result.ok else ("✗" if result.required else "-")
-            typer.echo(f"{marker} {result.name}: {result.detail}")
+            if result.required and result.ok:
+                marker, style = "✓", "rf.success"
+            elif result.required and not result.ok:
+                marker, style = "✗", "rf.error"
+            elif result.ok:
+                marker, style = "○", "rf.muted"
+            else:
+                marker, style = "○", "rf.warning"
+            table.add_row(
+                f"[{style}]{marker}[/]",
+                f"[{style}]{result.name}[/]",
+                f"[rf.muted]{result.detail or ''}[/]",
+            )
             if not result.ok and result.hint:
-                typer.echo(f"    hint: {result.hint}")
+                table.add_row("", "", f"[rf.accent]  ↳ {result.hint}[/]")
+        console.print(table)
 
     if any(not result.ok and result.required for result in results):
         raise typer.Exit(code=1)
@@ -180,12 +344,18 @@ def init(
     claude: bool = typer.Option(
         False, "--claude", help="Also install the Claude Code skills into .claude/skills/."
     ),
+    cursor: bool = typer.Option(
+        False,
+        "--cursor",
+        help="Write an always-on Cursor gateway rule into .cursor/rules/researchforge.mdc.",
+    ),
     json_output: JsonOption = False,
 ) -> None:
     """Initialize a ResearchForge project in the current directory."""
     from researchforge.claude.installer import InstallReport, install_skills
     from researchforge.config.paths import find_project_root
     from researchforge.config.registry import touch_project
+    from researchforge.cursor.installer import RuleReport, install_gateway
 
     already = is_initialized()
     ancestor = None if already else find_project_root(Path.cwd().parent)
@@ -213,6 +383,7 @@ def init(
             touch_project(Path.cwd())
 
     skills: InstallReport | None = install_skills() if claude else None
+    gateway: RuleReport | None = install_gateway() if cursor else None
 
     if json_output:
         payload: dict[str, object]
@@ -222,27 +393,47 @@ def init(
             payload = {"status": "already_initialized"}
         if skills is not None:
             payload["skills"] = skills.model_dump()
+        if gateway is not None:
+            payload["cursor_gateway"] = gateway.model_dump()
         typer.echo(json.dumps(payload, indent=2))
         return
 
+    from researchforge.utils.console import console, print_banner
+
     if already:
-        typer.echo("Already initialized.")
+        console.print("[rf.muted]Already initialized.[/]")
     else:
         assert project is not None
-        typer.echo(f"Initialized ResearchForge project '{project.name}' in {researchforge_dir()}")
+        print_banner()
+        console.print(
+            f"[rf.success]✓[/] Project [bold]{project.name}[/] initialized"
+            f" in [rf.path]{researchforge_dir()}[/]"
+        )
     if skills is not None:
-        typer.echo(f"Claude skills installed in {skills.skills_dir}:")
+        console.print(f"\n[rf.primary]Claude Code Skills[/] → [rf.path]{skills.skills_dir}[/]")
         for result in skills.results:
-            typer.echo(f"  /{result.skill} ({result.action.value})")
+            console.print(f"  [rf.success]/{result.skill}[/] [rf.muted]({result.action.value})[/]")
         if skills.conflicts:
-            typer.echo(
-                "Modified skills were left untouched; `researchforge claude install --force` "
-                "overwrites them."
+            console.print(
+                "[rf.warning]![/] Modified skills were left untouched; "
+                "[bold]researchforge claude install --force[/] overwrites them."
             )
-        typer.echo(
-            "Start in Claude Code with /researchforge-start, or from the CLI:\n"
-            "  researchforge project create --mode explore_research_idea --objective ...\n"
-            "  researchforge project create --mode improve_repository --objective ..."
+        console.print(
+            "\n[rf.muted]Start in Claude Code with[/] [bold]/researchforge-start[/][rf.muted], "
+            "or from the CLI:[/]\n"
+            "  [rf.muted]researchforge project create --mode explore_research_idea "
+            "--objective ...[/]\n"
+            "  [rf.muted]researchforge project create --mode improve_repository "
+            "--objective ...[/]"
+        )
+    if gateway is not None:
+        console.print(
+            f"\n[rf.primary]Cursor Gateway[/] [rf.muted]{gateway.action.value}[/]"
+            f" → [rf.path]{gateway.path}[/]"
+        )
+        console.print(
+            "[rf.muted]  Open this folder in Cursor — the AI will know ResearchForge "
+            "is here and which rules to use.[/]"
         )
 
 

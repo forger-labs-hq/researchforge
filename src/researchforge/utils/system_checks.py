@@ -113,5 +113,33 @@ def check_claude_skills() -> CheckResult:
     return CheckResult(name="claude skills", ok=True, required=False, detail=detail)
 
 
+def check_cursor_rules() -> CheckResult:
+    """Informational: whether the Cursor rules are installed here."""
+    from researchforge.cursor.installer import RuleAction, rules_status
+
+    states = [result.action for result in rules_status().results]
+    installed = sum(1 for a in states if a is RuleAction.UNCHANGED)
+    modified = sum(1 for a in states if a is RuleAction.MODIFIED)
+    if installed + modified == 0:
+        return CheckResult(
+            name="cursor rules",
+            ok=True,
+            required=False,
+            detail="not installed",
+            hint="Run `researchforge cursor install` to use ResearchForge from Cursor.",
+        )
+    detail = f"{installed}/{len(states)} installed"
+    if modified:
+        detail += f", {modified} locally modified"
+    return CheckResult(name="cursor rules", ok=True, required=False, detail=detail)
+
+
 def run_all_checks() -> list[CheckResult]:
-    return [check_python(), check_git(), check_docker(), check_gh(), check_claude_skills()]
+    return [
+        check_python(),
+        check_git(),
+        check_docker(),
+        check_gh(),
+        check_claude_skills(),
+        check_cursor_rules(),
+    ]

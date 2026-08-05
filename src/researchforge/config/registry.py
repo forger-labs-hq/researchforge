@@ -106,3 +106,12 @@ def touch_project(root: Path) -> RegistryEntry | None:
 
 def find_by_slug(slug: str) -> RegistryEntry | None:
     return next((entry for entry in load_registry() if entry.slug == slug), None)
+
+
+def prune_missing() -> list[RegistryEntry]:
+    """Remove entries whose project folder no longer exists. Returns the removed entries."""
+    entries = load_registry()
+    missing = [e for e in entries if not e.exists]
+    if missing:
+        _save([e for e in entries if e.exists])
+    return missing

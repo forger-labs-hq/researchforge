@@ -13,7 +13,7 @@ from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from researchforge import __version__
 from researchforge.config.registry import RegistryEntry, find_by_slug, load_registry
@@ -29,6 +29,30 @@ from researchforge.server.pages import (
     session_page,
 )
 
+_LOGO_SEARCH_PATHS = [
+    Path.home() / ".researchforge" / "logo.png",
+    Path.home() / ".researchforge" / "logo.jpeg",
+    Path.home() / ".researchforge" / "logo.jpg",
+]
+
+
+def _logo_path() -> Path | None:
+    return next((p for p in _LOGO_SEARCH_PATHS if p.is_file()), None)
+
+
+def _logo_html(size: int = 56, extra_style: str = "") -> str:
+    """Return an <img> tag when a logo is installed, ASCII fox otherwise."""
+    if _logo_path() is not None:
+        style = f"width:{size}px;height:{size}px;object-fit:contain;border-radius:8px"
+        if extra_style:
+            style += f";{extra_style}"
+        return (
+            f"<img src='/logo' alt='ResearchForge' style='{style}' "
+            "onerror=\"this.style.display='none'\">\n"
+        )
+    return "<pre class='rf-fox'>  /\\   /\\ \n ( o   o )\n  \\_____/ </pre>"
+
+
 HUB_REFRESH_SECONDS = 15
 
 
@@ -38,27 +62,41 @@ def _project_card(entry: RegistryEntry, state: ProjectState | None) -> str:
     if state is None:
         reason = "folder moved or deleted" if not entry.exists else "database unreadable"
         return (
-            "<div class='card'>"
-            f"<div class='k'>{escape(entry.name)} <span class='badge' "
-            f"style='background:var(--chart-bad)'>missing</span></div>"
-            f"<div class='d'><code>{escape(entry.path)}</code></div>"
+            "<div class='card project-card s-missing'>"
+            f"<div style='display:flex;align-items:center;gap:8px;justify-content:space-between'>"
+            f"<span style='font-weight:700;color:var(--fg)'>{escape(entry.name)}</span>"
+            f"<span class='badge' style='background:var(--chart-bad)'>missing</span></div>"
+            f"<div class='d' style='margin-top:6px'><code>{escape(entry.path)}</code></div>"
             f"<div class='d'>{escape(reason)} · last active {escape(last_active)}</div>"
             "</div>"
         )
     project = state.project
-    mode = project.mode.value if project.mode else "mode unset"
-    live = "<span class='live'>● live</span> " if state.run_in_progress else ""
-    counts = (
-        f"{len(state.papers)} papers · {len(state.hypotheses)} hypotheses · "
-        f"{len(state.experiments)} experiments"
+    mode = project.mode.value.replace("_", " ") if project.mode else "mode unset"
+    status_val = project.status.value
+    slug = entry.slug
+    live_badge = (
+        "<span class='live' style='color:var(--chart-good);font-weight:700;margin-right:6px'>"
+        "● live</span>"
+        if state.run_in_progress
+        else ""
     )
+    papers = len(state.papers)
+    hypotheses = len(state.hypotheses)
+    experiments = len(state.experiments)
     return (
-        "<div class='card'>"
-        f"<div class='k'>{live}<a href='/p/{escape(entry.slug)}/'>{escape(entry.name)}</a> "
-        f"<span class='badge' style='background:var(--chart-info)'>"
-        f"{escape(project.status.value)}</span></div>"
-        f"<div class='d'>{escape(mode)} · {escape(counts)}</div>"
-        f"<div class='d'><code>{escape(entry.path)}</code></div>"
+        f"<div class='card project-card s-{escape(status_val)}'>"
+        "<div style='display:flex;align-items:flex-start;justify-content:space-between;gap:12px'>"
+        f"<div>{live_badge}"
+        f"<a href='/p/{escape(slug)}/' class='card-name'>{escape(entry.name)}</a></div>"
+        f"<span class='badge' style='background:var(--chart-info);flex-shrink:0'>"
+        f"{escape(status_val)}</span></div>"
+        f"<div class='d' style='margin-top:6px'>{escape(mode)}</div>"
+        "<div class='card-stats'>"
+        f"<span class='stat-pill'>📄 {papers} paper{'s' if papers != 1 else ''}</span>"
+        f"<span class='stat-pill'>💡 {hypotheses} hypothesis</span>"
+        f"<span class='stat-pill'>⚗ {experiments} exp{'s' if experiments != 1 else ''}</span>"
+        "</div>"
+        f"<div class='d' style='margin-top:8px'><code>{escape(entry.path)}</code></div>"
         f"<div class='d'>last active {escape(last_active)}</div>"
         "</div>"
     )
@@ -66,36 +104,79 @@ def _project_card(entry: RegistryEntry, state: ProjectState | None) -> str:
 
 def hub_home_page() -> str:
     entries = sorted(load_registry(), key=lambda e: e.last_active, reverse=True)
-    cards = []
+    active_cards: list[str] = []
+    missing_cards: list[str] = []
     for entry in entries:
         state: ProjectState | None = None
         try:
             state = read_state(Path(entry.path))
-        except Exception:  # noqa: BLE001 — a broken project must not hide the rest
+        except Exception:  # noqa: BLE001
             state = None
-        cards.append(_project_card(entry, state))
-    if cards:
-        body = f"<div class='cards' style='grid-template-columns:1fr'>{''.join(cards)}</div>"
+        (missing_cards if state is None else active_cards).append(_project_card(entry, state))
+
+    if active_cards:
+        main_body = f"<div class='project-grid'>{''.join(active_cards)}</div>"
     else:
-        body = (
-            "<p class='empty'>No projects registered yet. Initialize one anywhere with "
-            "<code>researchforge init</code> (or <code>researchforge -C /some/folder init"
-            "</code>) and it appears here.</p>"
+        main_body = (
+            "<div class='empty-state'>"
+            f"{_logo_html(72, 'margin-bottom:16px;display:block')}"
+            "<p style='font-size:1.1rem;font-weight:600;color:var(--fg)'>No projects yet</p>"
+            "<p>Initialize one anywhere and it appears here automatically.</p>"
+            "<p><code>researchforge init</code> &nbsp;or&nbsp; "
+            "<code>researchforge -C ~/my-project init</code></p>"
+            "</div>"
         )
+
+    missing_section = ""
+    if missing_cards:
+        missing_section = (
+            "<details style='margin-top:24px'>"
+            f"<summary style='cursor:pointer;color:var(--fg-muted);font-size:0.85rem;"
+            f"padding:8px 0;user-select:none'>"
+            f"<span style='color:var(--chart-bad)'>▸</span>"
+            f" {len(missing_cards)} missing project"
+            f"{'s' if len(missing_cards) != 1 else ''}"
+            " — folder moved or deleted &nbsp;·&nbsp; "
+            "<code style='font-size:0.8rem'>researchforge hub --prune</code> to remove</summary>"
+            f"<div class='project-grid' style='margin-top:12px;opacity:.6'>"
+            f"{''.join(missing_cards)}</div>"
+            "</details>"
+        )
+
+    project_count = len(active_cards)
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>ResearchForge — all projects</title>"
+        "<title>ResearchForge Hub</title>"
         f"<meta http-equiv='refresh' content='{HUB_REFRESH_SECONDS}'>"
         f"<style>{_PAGE_CSS}"
-        ".card .k a{color:var(--fg);text-decoration:none}"
-        ".card .k a:hover{text-decoration:underline}</style></head>"
-        f"<body><nav><a href='/' class='active'>All projects</a>"
-        f"<span style='margin-left:auto' class='sub'>ResearchForge {__version__} "
-        "— hub · read-only</span></nav>"
-        f"<h1>Projects</h1><p class='sub'>Every ResearchForge project on this machine, "
-        "with where it lives on disk. Newly initialized projects appear automatically."
-        f"</p>{body}</body></html>"
+        ".project-card .card-name{{color:var(--fg);text-decoration:none}}"
+        ".project-card .card-name:hover{{color:var(--brand)}}"
+        "details>summary::marker{{color:var(--fg-muted)}}"
+        "details[open]>summary span{{transform:rotate(90deg);display:inline-block}}"
+        "</style></head>"
+        "<body>"
+        "<nav>"
+        "<span class='nav-brand'>⬥ ResearchForge</span>"
+        "<a href='/' class='active'>Hub</a>"
+        f"<span style='margin-left:auto' class='sub'>v{__version__} · read-only · "
+        f"refreshes every {HUB_REFRESH_SECONDS}s</span>"
+        "</nav>"
+        "<div class='rf-masthead'>"
+        f"{_logo_html(80)}"
+        "<div>"
+        "<div class='rf-brand-name'>ResearchForge</div>"
+        "<h1 style='margin:0 0 4px'>All Projects</h1>"
+        f"<p class='sub' style='margin:0'>{project_count} active project"
+        f"{'s' if project_count != 1 else ''} · "
+        "newly initialized projects appear automatically</p>"
+        "</div>"
+        "<span style='margin-left:auto;color:var(--chart-good);font-weight:700' "
+        "class='live'>● hub</span>"
+        "</div>"
+        f"{main_body}{missing_section}"
+        f"<footer>ResearchForge {__version__} · hub · read-only · 127.0.0.1 only</footer>"
+        "</body></html>"
     )
 
 
@@ -121,6 +202,14 @@ def create_hub_app() -> FastAPI:
         entry = find_by_slug(slug)
         assert entry is not None  # project_state ran first
         return Path(entry.path)
+
+    @app.get("/logo")
+    def logo() -> FileResponse:
+        path = _logo_path()
+        if path is None:
+            raise HTTPException(status_code=404, detail="No logo installed.")
+        media = "image/png" if path.suffix == ".png" else "image/jpeg"
+        return FileResponse(str(path), media_type=media)
 
     @app.get("/", response_class=HTMLResponse)
     def home() -> str:

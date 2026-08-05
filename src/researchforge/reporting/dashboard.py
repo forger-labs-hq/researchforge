@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from html import escape
+from pathlib import Path
 
 from researchforge import __version__
 from researchforge.config.settings import load_settings
@@ -48,45 +49,137 @@ from researchforge.reporting.svg_charts import (
 DASHBOARD_CSS = """
 :root {
   --bg: #ffffff; --card: #f6f8fa; --fg: #1f2328; --fg-muted: #59636e;
-  --grid: #d1d9e0; --chart-good: #1a7f37; --chart-info: #0969da;
-  --chart-bad: #cf222e; --chart-muted: #8c959f; --chart-baseline: #6639ba;
+  --grid: #e1e4e8; --brand: #7C3AED; --accent: #F59E0B;
+  --chart-good: #10B981; --chart-info: #7C3AED;
+  --chart-bad: #EF4444; --chart-muted: #9CA3AF; --chart-baseline: #F59E0B;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1117; --card: #161b22; --fg: #e6edf3; --fg-muted: #8d96a0;
-    --grid: #30363d; --chart-good: #3fb950; --chart-info: #58a6ff;
-    --chart-bad: #f85149; --chart-muted: #6e7681; --chart-baseline: #bc8cff;
+    --grid: #30363d; --brand: #A78BFA; --accent: #FCD34D;
+    --chart-good: #34D399; --chart-info: #A78BFA;
+    --chart-bad: #F87171; --chart-muted: #6B7280; --chart-baseline: #FCD34D;
   }
 }
 * { box-sizing: border-box; }
-body { background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 860px;
-  padding: 24px 16px 60px; font-family: ui-sans-serif, system-ui, sans-serif; }
-h1 { font-size: 1.5rem; margin: 0 0 4px; }
-h2 { font-size: 1.1rem; margin: 32px 0 10px; }
-.sub { color: var(--fg-muted); margin: 0 0 20px; }
+html { border-top: 3px solid var(--brand); }
+body { background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 880px;
+  padding: 28px 20px 64px; font-family: ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size: 1.45rem; margin: 0 0 4px; font-weight: 700; }
+h2 { font-size: 1rem; font-weight: 600; margin: 36px 0 10px; padding-left: 10px;
+  border-left: 3px solid var(--accent); color: var(--fg); }
+.sub { color: var(--fg-muted); margin: 0 0 20px; font-size: 0.9rem; }
 .cards { display: flex; gap: 12px; flex-wrap: wrap; }
-.card { background: var(--card); border-radius: 8px; padding: 12px 16px; flex: 1 1 160px; }
-.card .k { color: var(--fg-muted); font-size: 0.75rem; text-transform: uppercase; }
-.card .v { font-size: 1.25rem; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
-.card .d { color: var(--fg-muted); font-size: 0.8rem; margin-top: 2px; }
-.card.stat .v { font-size: 1.8rem; letter-spacing: -0.02em; }
-svg { width: 100%; height: auto; background: var(--card); border-radius: 8px; padding: 8px; }
+.card { background: var(--card); border-radius: 8px; padding: 12px 16px;
+  flex: 1 1 160px; border: 1px solid var(--grid); }
+.card .k { color: var(--fg-muted); font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.05em; }
+.card .v { font-size: 1.2rem; font-weight: 600; margin-top: 3px; overflow-wrap: anywhere; }
+.card .d { color: var(--fg-muted); font-size: 0.78rem; margin-top: 3px; }
+.card.stat { border-top: 2px solid var(--brand); }
+.card.stat .v { font-size: 1.8rem; letter-spacing: -0.02em; color: var(--brand); }
+svg { width: 100%; height: auto; background: var(--card); border-radius: 8px;
+  padding: 8px; border: 1px solid var(--grid); }
 table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid);
   vertical-align: top; }
-th { color: var(--fg-muted); font-weight: 600; }
-.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff;
-  font-size: 0.75rem; white-space: nowrap; }
-.caveat { background: var(--card); border-left: 3px solid var(--chart-baseline);
-  padding: 8px 12px; border-radius: 0 6px 6px 0; color: var(--fg-muted); font-size: 0.85rem;
-  margin: 8px 0; }
+th { color: var(--fg-muted); font-weight: 600; font-size: 0.78rem;
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 10px; color: #fff;
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap; letter-spacing: 0.02em; }
+.caveat { background: var(--card); border-left: 3px solid var(--accent);
+  padding: 10px 14px; border-radius: 0 8px 8px 0; color: var(--fg-muted);
+  font-size: 0.84rem; margin: 10px 0; }
 .empty { color: var(--fg-muted); font-style: italic; }
-footer { margin-top: 40px; color: var(--fg-muted); font-size: 0.8rem; }
+.rf-masthead { display: flex; align-items: center; gap: 18px;
+  margin: 0 0 28px; padding-bottom: 24px; border-bottom: 1px solid var(--grid); }
+.rf-fox { font-family: ui-monospace, monospace; font-size: 0.78rem; line-height: 1.5;
+  color: var(--accent); white-space: pre; margin: 0; user-select: none; }
+.rf-brand-name { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--brand); margin-bottom: 6px; }
+footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--grid);
+  color: var(--fg-muted); font-size: 0.78rem; }
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+.live { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* ── Card hover lift ─────────────────────────────────────────────────────── */
+.card { transition: transform .15s ease, box-shadow .15s ease; }
+.card:hover { transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(124,58,237,.12); }
+.card.stat .v {
+  background: linear-gradient(135deg, var(--brand), var(--accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; }
+
+/* ── Masthead gradient background ───────────────────────────────────────── */
+.rf-masthead {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--brand) 7%, var(--bg)) 0%, var(--bg) 70%);
+  border-radius: 12px; padding: 20px 24px; margin-bottom: 28px; }
+
+/* ── Hub project-card status borders ────────────────────────────────────── */
+.project-card { border-left: 3px solid var(--brand); }
+.project-card.s-baselined,
+.project-card.s-experiments_running { border-left-color: var(--accent); }
+.project-card.s-validated,
+.project-card.s-shipped { border-left-color: var(--chart-good); }
+.project-card.s-missing { border-left-color: var(--chart-bad); opacity: .7; }
+.project-card .card-name { font-weight: 700; font-size: 1rem;
+  color: var(--fg); text-decoration: none; }
+.project-card .card-name:hover { color: var(--brand); }
+.project-card .card-stats { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.stat-pill { background: var(--bg); border: 1px solid var(--grid); border-radius: 12px;
+  padding: 2px 10px; font-size: 0.72rem; color: var(--fg-muted); }
+.project-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+.empty-state { text-align: center; padding: 60px 20px; }
+.empty-fox { font-family: ui-monospace, monospace; color: var(--accent);
+  font-size: 1rem; line-height: 1.6; display: inline-block; white-space: pre; }
+.empty-state p { color: var(--fg-muted); margin: 8px 0; }
+
+/* ── Nav improvements ───────────────────────────────────────────────────── */
+nav { align-items: center; }
+nav a { padding: 4px 0; border-bottom: 2px solid transparent;
+  transition: color .1s, border-color .1s; }
+nav a.active,nav a[class=active] { color: var(--fg); border-bottom-color: var(--brand); }
+nav a:hover { color: var(--fg); }
+.nav-brand { font-weight: 800; color: var(--brand); letter-spacing: -.01em;
+  font-size: .95rem; flex-shrink: 0; margin-right: 4px; }
+
+/* ── Inline code ─────────────────────────────────────────────────────────── */
+code { background: var(--card); padding: 1px 6px; border-radius: 4px;
+  font-size: .88em; border: 1px solid var(--grid); }
 """
 
 
 def _badge(status: str) -> str:
     return f"<span class='badge' style='background:{status_color(status)}'>{escape(status)}</span>"
+
+
+def _logo_html_inline(size: int = 56) -> str:
+    """Embed the logo as a base64 data URI for self-contained static HTML files.
+    Falls back to ASCII fox art when no logo is installed.
+    """
+    import base64
+
+    search_paths = [
+        Path.home() / ".researchforge" / "logo.png",
+        Path.home() / ".researchforge" / "logo.jpeg",
+        Path.home() / ".researchforge" / "logo.jpg",
+    ]
+    for p in search_paths:
+        if p.is_file():
+            mime = "image/png" if p.suffix == ".png" else "image/jpeg"
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            return (
+                f"<img src='data:{mime};base64,{b64}' alt='ResearchForge' "
+                f"style='width:{size}px;height:{size}px;object-fit:contain;"
+                f"border-radius:8px;background:transparent'>"
+            )
+    return "<pre class='rf-fox'>/\\   /\\\n( o   o )\n \\_____/</pre>"
 
 
 def _latest_full_value(executions: list[ExperimentExecution], experiment_id: str) -> float | None:
@@ -400,8 +493,14 @@ def _header_section(
         for key, value, detail in cards
     )
     return (
-        f"<h1>ResearchForge dashboard — {escape(name)}</h1>"
+        "<div class='rf-masthead'>"
+        f"{_logo_html_inline(80)}"
+        "<div>"
+        "<div class='rf-brand-name'>ResearchForge</div>"
+        f"<h1>dashboard &mdash; {escape(name)}</h1>"
         "<p class='sub'>Experiments vs the frozen baseline, from recorded data only.</p>"
+        "</div>"
+        "</div>"
         f"<div class='cards'>{rendered}</div>"
     )
 

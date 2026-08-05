@@ -1,12 +1,35 @@
-# ResearchForge
+<div align="center">
 
-*From papers to proof.*
+<img src="assets/logo.png" alt="ResearchForge" width="130">
+
+  <h1>ResearchForge</h1>
+  <p><em>From papers to proof.</em></p>
+  <p>
+    <a href="https://pypi.org/project/researchforge/"><img src="https://img.shields.io/pypi/v/researchforge?color=7C3AED&label=PyPI" alt="PyPI"></a>
+    <a href="https://pypi.org/project/researchforge/"><img src="https://img.shields.io/pypi/pyversions/researchforge?color=7C3AED" alt="Python 3.12+"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-F59E0B" alt="Apache 2.0"></a>
+    <a href="https://github.com/forger-labs-hq/researchforge/actions"><img src="https://img.shields.io/github/actions/workflow/status/forger-labs-hq/researchforge/ci.yml?label=CI&color=10B981" alt="CI"></a>
+  </p>
+
+  <br/>
+
+  <video src="assets/ResearchForgeIntro.mp4" controls width="720">
+    <a href="assets/ResearchForgeIntro.mp4">▶ Watch the intro</a>
+  </video>
+
+  <p><sub> Product introduction </sub></p>
+
+</div>
 
 ResearchForge turns a research question — or an "improve my repository"
-goal — into evidence. It finds relevant papers, helps Claude form testable
-hypotheses, benchmarks competing implementations against a frozen baseline
-in isolated local workspaces, and delivers the strongest supported result
-as a clean branch, an engineering report, or a research package.
+goal — into evidence. It finds relevant papers, helps your AI assistant form
+testable hypotheses, benchmarks competing implementations against a frozen
+baseline in isolated local workspaces, and delivers the strongest supported
+result as a clean branch, an engineering report, or a research package.
+
+Works with **Claude Code** (slash-command skills) and **Cursor** (MDC rules)
+out of the box — install once for your whole machine and every session picks
+them up automatically.
 
 Inspired by Andrej Karpathy's
 [autoresearch](https://github.com/karpathy/autoresearch), where an agent
@@ -22,7 +45,7 @@ Three parties with strict roles:
 | Who | Does what |
 |---|---|
 | **You** | set the objective; approve the benchmark contract, each experiment plan, and anything that ships |
-| **Claude** (in Claude Code) | reads the papers, writes the research landscape, hypotheses, and experiment patches; explains results |
+| **Your AI** (Claude Code or Cursor) | reads the papers, writes the research landscape, hypotheses, and experiment patches; explains results |
 | **The Python engine** | everything that must be trustworthy: search, validation, isolated execution, ranking, shipping — no prompt can bypass it |
 
 No model API key is required — Claude Code *is* the model. Every artifact
@@ -38,21 +61,27 @@ Everything runs on your machine — nothing is uploaded anywhere.
 # 1. Install ResearchForge (Python 3.12+):
 pip install "researchforge[serve]"       # or: pipx install "researchforge[serve]"
 
-# 2. Make ResearchForge available in EVERY Claude Code session (recommended):
-researchforge claude install --user      # skills -> ~/.claude/skills/
+# 2. Make ResearchForge available in every AI session — pick your IDE:
+researchforge claude install --user      # Claude Code only  → ~/.claude/skills/
+researchforge cursor install --user      # Cursor only       → ~/.cursor/rules/
+researchforge all install --user         # both at once      (recommended)
 ```
 
 (Skip step 2 if you like — the first time you run `researchforge` in a
-terminal it offers this install with one keystroke, and never asks again.)
+terminal it offers the Claude install with one keystroke, and never asks
+again. Run the command manually to add Cursor at any time.)
 
-That's the whole setup. Now open **any** Claude Code session and say what
-you want:
+That's the whole setup. Now open **any** Claude Code or Cursor session and
+say what you want:
 
-> `/researchforge-start` — *"Can uncertainty-aware routing outperform fixed
-> routing?"* — or — *"Improve this repo's F1 without hurting latency —
-> work in ~/projects/my-repo."*
+> **Claude Code:** `/researchforge-start` — *"Can uncertainty-aware routing
+> outperform fixed routing?"* — or — *"Improve this repo's F1 without
+> hurting latency — work in ~/projects/my-repo."*
+>
+> **Cursor:** open the AI panel, type `@researchforge-start` and describe
+> the same goal — the rules give Cursor the same workflow knowledge.
 
-Claude asks **where the project should live** (any folder — a cloned repo
+The AI asks **where the project should live** (any folder — a cloned repo
 to improve, or an empty directory for pure research), initializes it there,
 and walks the whole journey: it runs the CLI, shows you what it found, and
 **asks before anything is approved, executed, or shipped**. If you ever
@@ -60,9 +89,10 @@ wonder where things stand, `researchforge status` names the exact next
 step — and the **hub** at http://127.0.0.1:9000 shows every project, where
 it lives, and what's happening, all the time.
 
-Prefer per-project skills instead of the global install? `cd` into the
-folder and run `researchforge init --claude`, then start Claude Code **in
-that folder** (desktop app: open the folder as the session's project — a
+Prefer per-project rules/skills instead of the global install? `cd` into
+the folder and run `researchforge init --claude` (Claude), or
+`researchforge cursor install` (Cursor), then open your IDE **in that
+folder** (Claude Code: open the folder as the session's project — a
 home-screen session without a folder can't see project skills).
 
 Everything is **directory-scoped**: the database, worktrees, artifacts, and
@@ -164,6 +194,12 @@ published claim vs interpretation vs speculation), testable hypotheses, a
 citation-backed Markdown report, and optionally a full research bundle.
 Details: [docs/research-mode.md](docs/research-mode.md)
 
+<video src="assets/ResearchForgeDemoResearch.mp4" controls width="100%">
+  <a href="assets/ResearchForgeDemoResearch.mp4">▶ Watch the research flow demo</a>
+</video>
+
+<sub>↑ Research journey demo — arXiv search → landscape → hypotheses → report</sub>
+
 ## Journey B — improve a repository
 
 Everything in Journey A, then benchmarked experiments on your code. Every
@@ -236,6 +272,12 @@ CONTRIBUTING.md before opening PRs on repos you don't maintain — a draft
 PR with a reproducible, validated improvement is a good contribution; ten
 of them are spam.
 
+<video src="assets/ResearchForgeRepoDemoRepo.mp4" controls width="100%">
+  <a href="assets/ResearchForgeRepoDemoRepo.mp4">▶ Watch the improve-repository demo</a>
+</video>
+
+<sub>↑ Improve-repository demo — baseline → experiments → validation → ship branch + PR</sub>
+
 ### Managing experiment runs
 
 | I want to… | Command |
@@ -288,12 +330,24 @@ beta metrics you can choose to include in a report.
 ## More documentation
 
 - [docs/demo.md](docs/demo.md) — the launch demo, step by step
-- [docs/claude-mode.md](docs/claude-mode.md) — working from Claude Code
+- [docs/claude-mode.md](docs/claude-mode.md) — working from Claude Code (skills)
 - [docs/research-mode.md](docs/research-mode.md) — the research journey (CLI)
 - [docs/experiment-mode.md](docs/experiment-mode.md) — contract, funnel, shipping (CLI)
 - [docs/security.md](docs/security.md) — security model and honest limitations
 - [docs/architecture.md](docs/architecture.md) — code layout
 - [docs/RESEARCHFORGE_PHASED_BUILD_SPEC.md](docs/RESEARCHFORGE_PHASED_BUILD_SPEC.md) — the product spec
+
+### IDE integration quick-reference
+
+| Command | What it does |
+|---|---|
+| `researchforge claude install --user` | Install Claude Code skills → `~/.claude/skills/` |
+| `researchforge cursor install --user` | Install Cursor rules → `~/.cursor/rules/` |
+| `researchforge all install --user` | Install both at once |
+| `researchforge claude install` | Project-local Claude skills → `.claude/skills/` |
+| `researchforge cursor install` | Project-local Cursor rules → `.cursor/rules/` |
+| `researchforge all status` | Check install state for both IDEs |
+| `researchforge all install --user --force` | Overwrite any locally-edited files |
 
 ## License
 

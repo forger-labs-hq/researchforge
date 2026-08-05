@@ -28,7 +28,7 @@ class TestPages:
         assert response.status_code == 200
         assert "Next action" in response.text
         assert "ship branch" in response.text  # validated fixture's next step
-        assert "read-only monitor" in response.text
+        assert "monitor · read-only" in response.text
         assert "content='30'" in response.text  # no run in progress -> slow refresh
 
     def test_research_empty_state_is_honest(self, client) -> None:  # type: ignore[no-untyped-def]

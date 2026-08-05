@@ -37,6 +37,60 @@ details.session > summary { cursor: pointer; padding: 12px 0; font-weight: 600;
 details.session > summary .sub { font-weight: 400; }
 details.session[open] { padding-bottom: 12px; }
 details.session table { background: var(--bg); border-radius: 6px; }
+
+/* ── Research page ───────────────────────────────────────────────── */
+.query-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+.query-pill { display: inline-block;
+  background: color-mix(in srgb, var(--brand) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--grid));
+  border-radius: 16px; padding: 3px 12px; font-size: 0.75rem;
+  font-family: ui-monospace, monospace; color: var(--fg-muted); }
+.funnel-line { display: flex; align-items: center; gap: 6px; margin: 8px 0 14px;
+  font-size: 0.85rem; flex-wrap: wrap; }
+.funnel-num { font-weight: 700; color: var(--fg); }
+.funnel-arrow { color: var(--accent); font-weight: 700; font-size: 0.9rem; }
+.score-cell { white-space: nowrap; }
+.score-bar { display: inline-flex; align-items: center; gap: 6px; }
+.score-fill { height: 4px; border-radius: 2px; display: inline-block; min-width: 3px; }
+.score-high { color: var(--chart-good); }
+.score-mid { color: var(--accent); }
+.score-low { color: var(--fg-muted); }
+.paper-id-cell { font-size: 0.75rem; font-family: ui-monospace, monospace;
+  color: var(--fg-muted); white-space: nowrap; }
+.paper-title-cell { font-size: 0.85rem; }
+.research-hero { background: linear-gradient(135deg,
+    color-mix(in srgb, var(--brand) 6%, var(--bg)) 0%, var(--bg) 70%);
+  border-radius: 10px; padding: 16px 20px; margin-bottom: 24px;
+  border: 1px solid var(--grid); }
+.research-hero h1 { margin: 0 0 4px; font-size: 1.3rem; }
+.research-hero .objective { font-size: 0.9rem; color: var(--fg-muted);
+  margin: 0 0 10px; font-style: italic; }
+.research-hero .meta-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.meta-pill { background: var(--bg); border: 1px solid var(--grid);
+  border-radius: 12px; padding: 2px 10px; font-size: 0.72rem; color: var(--fg-muted); }
+.meta-pill.active { border-color: var(--brand); color: var(--brand); }
+.hyp-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.hyp-tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; font-weight: 600;
+  border: 1px solid transparent; }
+.hyp-tag.evidence-speculative { background: color-mix(in srgb,var(--fg-muted) 12%,var(--bg));
+  color: var(--fg-muted); border-color: var(--grid); }
+.hyp-tag.evidence-supported { background: color-mix(in srgb,var(--chart-good) 15%,var(--bg));
+  color: var(--chart-good); border-color: color-mix(in srgb,var(--chart-good) 30%,var(--grid)); }
+.hyp-tag.evidence-contested { background: color-mix(in srgb,var(--accent) 15%,var(--bg));
+  color: var(--accent); border-color: color-mix(in srgb,var(--accent) 30%,var(--grid)); }
+.hyp-tag.feasibility-high,.hyp-tag.effort-low {
+  background: color-mix(in srgb,var(--chart-good) 12%,var(--bg));
+  color: var(--chart-good); border-color: color-mix(in srgb,var(--chart-good) 25%,var(--grid)); }
+.hyp-tag.feasibility-medium,.hyp-tag.effort-medium {
+  background: color-mix(in srgb,var(--accent) 12%,var(--bg));
+  color: var(--accent); border-color: color-mix(in srgb,var(--accent) 25%,var(--grid)); }
+.hyp-tag.feasibility-low,.hyp-tag.effort-high {
+  background: color-mix(in srgb,var(--chart-bad) 10%,var(--bg));
+  color: var(--chart-bad); border-color: color-mix(in srgb,var(--chart-bad) 25%,var(--grid)); }
+.dir-id { display: inline-block; background: color-mix(in srgb,var(--brand) 10%,var(--bg));
+  color: var(--brand); border: 1px solid color-mix(in srgb,var(--brand) 25%,var(--grid));
+  border-radius: 6px; padding: 1px 8px; font-size: 0.75rem; font-weight: 700;
+  font-family: ui-monospace, monospace; margin-right: 6px; }
 """
 )
 
@@ -112,13 +166,19 @@ def page_shell(title: str, active: str, body: str, refresh: int | None, prefix: 
     )
     if prefix:
         nav = f"<a href='/'>⌂ all projects</a>{nav}"
+    nav = (
+        "<img src='/logo' alt='' style='width:24px;height:24px;object-fit:contain;"
+        "border-radius:4px;margin-right:4px;vertical-align:middle' "
+        "onerror=\"this.style.display='none'\">"
+        f"<span class='nav-brand'>RF</span>{nav}"
+    )
     meta_refresh = f"<meta http-equiv='refresh' content='{refresh}'>" if refresh else ""
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>{escape(title)}</title>{meta_refresh}<style>{_PAGE_CSS}</style></head>"
         f"<body><nav>{nav}<span style='margin-left:auto' class='sub'>ResearchForge "
-        f"{__version__} — read-only monitor</span></nav>{body}{STATE_KEEPER_SCRIPT}"
+        f"{__version__} — monitor · read-only</span></nav>{body}{STATE_KEEPER_SCRIPT}"
         "</body></html>"
     )
 
@@ -190,13 +250,35 @@ def overview_page(state: ProjectState) -> str:
 
 
 def _papers_table(papers: list[Paper]) -> str:
+    def _score_html(score: float) -> str:
+        cls = "score-high" if score >= 0.8 else ("score-mid" if score >= 0.4 else "score-low")
+        fill_color = (
+            "var(--chart-good)"
+            if score >= 0.8
+            else ("var(--accent)" if score >= 0.4 else "var(--chart-muted)")
+        )
+        width = max(3, int(score * 72))
+        return (
+            f"<div class='score-bar'>"
+            f"<span class='{cls}'>{score:.3f}</span>"
+            f"<span class='score-fill' style='width:{width}px;background:{fill_color}'></span>"
+            "</div>"
+        )
+
     rows = "".join(
-        f"<tr><td>{paper.relevance_score:.3f}</td><td>{escape(paper.paper_id)}</td>"
-        f"<td>{escape(paper.title)}</td></tr>"
+        f"<tr>"
+        f"<td class='score-cell'>{_score_html(paper.relevance_score)}</td>"
+        f"<td class='paper-id-cell'>{escape(paper.paper_id)}</td>"
+        f"<td class='paper-title-cell'>{escape(paper.title)}</td>"
+        f"</tr>"
         for paper in papers
     )
     return (
-        "<table><thead><tr><th>score</th><th>id</th><th>title</th></tr></thead>"
+        "<table><thead><tr>"
+        "<th style='width:110px'>score</th>"
+        "<th style='width:140px'>id</th>"
+        "<th>title</th>"
+        "</tr></thead>"
         f"<tbody>{rows}</tbody></table>"
     )
 
@@ -217,13 +299,19 @@ def _search_session_details(state: ProjectState) -> list[str]:
             f"{run.get('selected_count', 0)} selected</span>"
         )
         inner = [
-            "<p class='sub'>"
-            + escape(
-                f"fetched {run.get('fetched_count', 0)} → deduplicated "
-                f"{run.get('deduped_count', 0)} → selected {run.get('selected_count', 0)}"
-            )
-            + "</p>",
-            "<ul>" + "".join(f"<li><code>{escape(str(q))}</code></li>" for q in queries) + "</ul>",
+            "<div class='funnel-line'>"
+            f"<span class='funnel-num'>{run.get('fetched_count', 0)}</span>"
+            "<span class='sub'>fetched</span>"
+            "<span class='funnel-arrow'>→</span>"
+            f"<span class='funnel-num'>{run.get('deduped_count', 0)}</span>"
+            "<span class='sub'>deduplicated</span>"
+            "<span class='funnel-arrow'>→</span>"
+            f"<span class='funnel-num'>{run.get('selected_count', 0)}</span>"
+            "<span class='sub'>selected</span>"
+            "</div>",
+            "<div class='query-pills'>"
+            + "".join(f"<span class='query-pill'>{escape(str(q))}</span>" for q in queries)
+            + "</div>",
         ]
         linked = [
             papers_by_id[pid]
@@ -249,7 +337,37 @@ def _search_session_details(state: ProjectState) -> list[str]:
 
 
 def research_page(state: ProjectState) -> str:
-    body = ["<h1>Research</h1>"]
+    project = state.project
+    meta_pills = [
+        f"<span class='meta-pill active'>{len(state.search_runs)} session"
+        f"{'s' if len(state.search_runs) != 1 else ''}</span>",
+        f"<span class='meta-pill active'>{len(state.papers)} paper"
+        f"{'s' if len(state.papers) != 1 else ''}</span>",
+    ]
+    if state.landscape:
+        meta_pills.append(
+            f"<span class='meta-pill active'>"
+            f"{len(state.landscape.directions)} direction"
+            f"{'s' if len(state.landscape.directions) != 1 else ''}</span>"
+        )
+    if state.hypotheses:
+        meta_pills.append(
+            f"<span class='meta-pill active'>{len(state.hypotheses)} hypothesis</span>"
+        )
+    objective = escape(project.objective or "")
+    hero = (
+        "<div class='research-hero'>"
+        "<div style='display:flex;align-items:center;gap:14px;margin-bottom:12px'>"
+        "<img src='/logo' alt='ResearchForge' style='width:44px;height:44px;"
+        "object-fit:contain;border-radius:6px' onerror=\"this.style.display='none'\">"
+        "<div>"
+        "<h1 style='margin:0'>Research</h1>"
+        + (f"<p class='objective' style='margin:2px 0 0'>{objective}</p>" if objective else "")
+        + "</div></div>"
+        + f"<div class='meta-pills'>{''.join(meta_pills)}</div>"
+        "</div>"
+    )
+    body = [hero]
     if not state.search_runs and not state.papers:
         body.append(
             guidance_card(
@@ -307,7 +425,7 @@ def _direction_details(direction: object, landscape: object) -> str:
     ]
     return (
         f"<details class='session' id='{escape(direction.direction_id)}'>"
-        f"<summary>[{escape(direction.direction_id)}] "
+        f"<summary><span class='dir-id'>{escape(direction.direction_id)}</span>"
         f"{escape(direction.name)} <span class='sub'>· {len(direction.paper_ids)} paper(s) "
         f"· {len(claims)} claim(s)</span></summary>"
         f"<p>{escape(direction.description)}</p>"
@@ -363,26 +481,35 @@ def _hypothesis_details(hypothesis: object) -> str:
     impact_text = (
         f"{impact.metric} ({impact.direction})" if impact.metric else str(impact.direction)
     )
-    facts = (
-        f"evidence: {hypothesis.evidence_status} · feasibility: "
-        f"{hypothesis.feasibility.value} · effort: {hypothesis.estimated_effort.value} · "
-        f"novelty confidence: {hypothesis.novelty_confidence.value} · expected impact: "
-        f"{impact_text}"
+    ev_raw = hypothesis.evidence_status
+    ev_val = ev_raw if isinstance(ev_raw, str) else getattr(ev_raw, "value", str(ev_raw))
+    feas_val = hypothesis.feasibility.value
+    effort_val = hypothesis.estimated_effort.value
+    tags = (
+        f"<div class='hyp-meta'>"
+        f"<span class='hyp-tag evidence-{escape(ev_val.lower())}'>"
+        f"evidence: {escape(ev_val)}</span>"
+        f"<span class='hyp-tag feasibility-{escape(feas_val.lower())}'>"
+        f"feasibility: {escape(feas_val)}</span>"
+        f"<span class='hyp-tag effort-{escape(effort_val.lower())}'>"
+        f"effort: {escape(effort_val)}</span>"
+        f"<span class='hyp-tag'>impact: {escape(impact_text)}</span>"
         + (
-            f" · ~{hypothesis.estimated_experiment_count} experiment(s)"
+            f"<span class='hyp-tag'>~{hypothesis.estimated_experiment_count} exp</span>"
             if hypothesis.estimated_experiment_count
             else ""
         )
+        + "</div>"
     )
     return (
         f"<details class='session' id='{escape(hypothesis.hypothesis_id)}'>"
-        f"<summary>{escape(hypothesis.hypothesis_id)} "
+        f"<summary><span class='dir-id'>{escape(hypothesis.hypothesis_id)}</span>"
         f"{escape(hypothesis.title)} <span class='sub'>· {escape(hypothesis.status.value)}"
         f"</span></summary>"
+        f"{tags}"
         f"<p><strong>Claim:</strong> {escape(hypothesis.claim)}</p>"
         f"<p><strong>Rationale:</strong> {escape(hypothesis.rationale)}</p>"
         f"<p><strong>Proposed experiment:</strong> {escape(hypothesis.proposed_experiment)}</p>"
-        f"<p class='sub'>{escape(facts)}</p>"
         + _bullets("Supporting papers", hypothesis.supporting_paper_ids)
         + _bullets("Contradicting papers", hypothesis.contradicting_paper_ids)
         + _bullets("Repository observations", hypothesis.repository_observations)

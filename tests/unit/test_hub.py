@@ -204,7 +204,7 @@ class TestHubApp:
 
         client = TestClient(create_hub_app())
         text = client.get("/").text
-        assert "No projects registered yet" in text
+        assert "No projects yet" in text
 
 
 class TestHubCli:

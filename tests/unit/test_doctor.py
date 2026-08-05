@@ -88,11 +88,11 @@ def test_check_tool_survives_subprocess_timeout(monkeypatch: pytest.MonkeyPatch)
     assert "version unknown" in result.detail
 
 
-def test_run_all_checks_returns_five_results() -> None:
+def test_run_all_checks_returns_six_results() -> None:
     results = run_all_checks()
 
     names = {r.name for r in results}
-    assert names == {"python", "git", "docker", "gh", "claude skills"}
+    assert names == {"python", "git", "docker", "gh", "claude skills", "cursor rules"}
 
 
 def test_check_claude_skills_states(isolated_project_dir: Path) -> None:
