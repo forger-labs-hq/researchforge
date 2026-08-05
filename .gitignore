@@ -58,3 +58,6 @@ todo.md
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+
+# Compressed upload copies (temp)
+assets/*_small.mp4
