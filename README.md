@@ -13,7 +13,7 @@
 
   <br/>
 
-  <video src="assets/ResearchForgeIntro.mp4" controls width="720">
+  <video src="https://github.com/user-attachments/assets/c367afe9-9f95-42f6-b6db-97e8ab02321b" controls width="720">
     <a href="assets/ResearchForgeIntro.mp4">▶ Watch the intro</a>
   </video>
 
@@ -194,7 +194,7 @@ published claim vs interpretation vs speculation), testable hypotheses, a
 citation-backed Markdown report, and optionally a full research bundle.
 Details: [docs/research-mode.md](docs/research-mode.md)
 
-<video src="assets/ResearchForgeDemoResearch.mp4" controls width="100%">
+<video src="https://github.com/user-attachments/assets/428eedb6-83eb-432e-8353-d31efe04b02c" controls width="100%">
   <a href="assets/ResearchForgeDemoResearch.mp4">▶ Watch the research flow demo</a>
 </video>
 
@@ -272,7 +272,7 @@ CONTRIBUTING.md before opening PRs on repos you don't maintain — a draft
 PR with a reproducible, validated improvement is a good contribution; ten
 of them are spam.
 
-<video src="assets/ResearchForgeRepoDemoRepo.mp4" controls width="100%">
+<video src="https://github.com/user-attachments/assets/a29ed8e1-7b73-4826-a07b-b90e1dd4316b" controls width="100%">
   <a href="assets/ResearchForgeRepoDemoRepo.mp4">▶ Watch the improve-repository demo</a>
 </video>
 
