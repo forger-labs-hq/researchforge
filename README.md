@@ -38,7 +38,7 @@ ResearchForge generalizes that loop to any repository with a measurable
 benchmark, and grounds it in literature: papers → hypotheses → controlled
 experiments → a validated, reproducible result.
 
-## How it works
+## Architecture: Human-in-the-Loop AI Verification
 
 Three parties with strict roles:
 
@@ -110,6 +110,18 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+## Security & Isolation — What Runs Where
+
+ResearchForge is a **local-only CLI** — no data leaves your machine.
+
+- **Experiments** run in detached git worktrees: your working checkout is never touched, modified, or read during a run
+- **No network calls** during execution — the contract's `network.mode: none` disables outbound connections inside experiment processes
+- **No credentials forwarded** unless you explicitly list them in `secrets.forward_environment_variables`
+- **AI writes patches; the Python engine enforces** — every proposed change is validated against the approved contract before it executes; the AI cannot bypass protected paths, resource limits, or approval gates
+- **All state is in `.researchforge/`** — fully inspectable, deletable with `rm -rf .researchforge researchforge.yaml`
+
+See [docs/security.md](docs/security.md) for the full threat model and honest limitations.
+
 ## See it work first
 
 [docs/demo.md](docs/demo.md) is a ten-minute, fully offline walkthrough
@@ -119,7 +131,7 @@ rejected for violating the latency budget, and one fails (all three stay in
 the record). [examples/docker-python](examples/docker-python/README.md) is
 the same demo under Docker isolation.
 
-## Watch your experiments (dashboard + live monitor)
+## Experiment Tracking Dashboard & Live Monitor
 
 Two ways to *see* how experiments perform against the baseline:
 
@@ -171,7 +183,7 @@ is simply always there (set `RESEARCHFORGE_NO_HUB=1` to opt out). Commands
 run in a subfolder of a project also walk up to find it (like `git`) and
 print `Using project at <root>` so you always know which project you're in.
 
-## Journey A — research an idea
+## Journey A — Explore a Research Idea (Literature Search → Hypotheses → Report)
 
 You have a question; ResearchForge grounds it in literature. From Claude
 Code, `/researchforge-start` with your question does all of this; the CLI
@@ -200,7 +212,7 @@ Details: [docs/research-mode.md](docs/research-mode.md)
 
 <sub>↑ Research journey demo — arXiv search → landscape → hypotheses → report</sub>
 
-## Journey B — improve a repository
+## Journey B — Automated Regression Testing & Local Benchmarking
 
 Everything in Journey A, then benchmarked experiments on your code. Every
 consequential step is **your** typed approval — Claude cannot approve, run,
