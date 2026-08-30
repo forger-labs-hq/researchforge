@@ -89,12 +89,13 @@ def diagnose(
                 fixes.append(
                     SetupFix(
                         new_command=(
-                            f"git add {candidate} src/config.py src/__init__.py 2>/dev/null || true; "
+                            f"git add {candidate} src/config.py src/__init__.py "
+                            "2>/dev/null || true; "
                             "git commit -m 'chore: add ResearchForge benchmark script' "
                             "2>/dev/null || true; "
                             f"{current_command}"
                         ),
-                        description=f"committing {candidate} to git so the worktree can find it",
+                        description=(f"committing {candidate} to git so the worktree can find it"),
                     )
                 )
                 break
@@ -117,7 +118,9 @@ def diagnose(
             fixes.append(
                 SetupFix(
                     new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
-                    description=f"switching to {req_files[0]} (pyproject.toml has no build backend)",
+                    description=(
+                        f"switching to {req_files[0]} (pyproject.toml has no build backend)"
+                    ),
                 )
             )
             # Fix B: --no-build-isolation prevents pip from building the local
@@ -379,7 +382,9 @@ def diagnose(
             fixes.append(
                 SetupFix(
                     new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
-                    description="falling back to requirements.txt install (pip install -e . failed)",
+                    description=(
+                        "falling back to requirements.txt install (pip install -e . failed)"
+                    ),
                 )
             )
         docker_hint = (
