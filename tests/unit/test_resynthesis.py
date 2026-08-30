@@ -90,9 +90,7 @@ def _experiment(
         patch_sha256="0" * 64,
         status=status,
         decision=(
-            Decision(outcome=DecisionOutcome.REJECT, reason=reason)
-            if reason is not None
-            else None
+            Decision(outcome=DecisionOutcome.REJECT, reason=reason) if reason is not None else None
         ),
         created_at=now,
         updated_at=now,
@@ -365,9 +363,7 @@ class TestFromResultsCli:
     def test_run_without_from_results_is_refused(
         self, cli_runner: CliRunner, project_with_hypotheses: Path
     ) -> None:
-        result = cli_runner.invoke(
-            app, ["research", "synthesize", "--run", "run-001"]
-        )
+        result = cli_runner.invoke(app, ["research", "synthesize", "--run", "run-001"])
 
         assert result.exit_code == 1
         assert "--run only applies with --from-results" in result.output

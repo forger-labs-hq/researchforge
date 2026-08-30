@@ -95,9 +95,9 @@ def _baseline(
     )
 
 
-def _plan(approval: PlanApproval | None = None, status: PlanStatus = PlanStatus.PLANNED) -> (
-    ExperimentPlan
-):
+def _plan(
+    approval: PlanApproval | None = None, status: PlanStatus = PlanStatus.PLANNED
+) -> ExperimentPlan:
     return ExperimentPlan(
         plan_id="plan-001",
         hypothesis_id="hyp-001",
@@ -469,9 +469,7 @@ class TestAuditLogCommand:
     def test_kind_filters_to_one_sort_of_entry(
         self, cli_runner: CliRunner, baselined_project: Path
     ) -> None:
-        result = cli_runner.invoke(
-            app, ["audit", "log", "--kind", "contract_approved", "--json"]
-        )
+        result = cli_runner.invoke(app, ["audit", "log", "--kind", "contract_approved", "--json"])
         assert result.exit_code == 0, result.output
         events = json.loads(result.output)["events"]
         assert events

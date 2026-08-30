@@ -363,9 +363,10 @@ class TestValidateEndToEnd:
         assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
         assert cli_runner.invoke(app, ["experiment", "approve", "plan-001", "--yes"]).exit_code == 0
         assert cli_runner.invoke(app, ["experiment", "run", "plan-001"]).exit_code == 0
-        assert cli_runner.invoke(
-            app, ["validate", "run-001", "--n", "3", "--yes", "--json"]
-        ).exit_code == 0
+        assert (
+            cli_runner.invoke(app, ["validate", "run-001", "--n", "3", "--yes", "--json"]).exit_code
+            == 0
+        )
 
         with closing(open_project_db()) as conn:
             contract = get_active_contract(conn)

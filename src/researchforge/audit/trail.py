@@ -132,9 +132,7 @@ def hypothesis_events(hypotheses: list[Hypothesis]) -> list[AuditEvent]:
             at=hypothesis.review.decided_at,
             kind=AuditEventKind.HYPOTHESIS_REVIEWED,
             subject=hypothesis.hypothesis_id,
-            summary=(
-                f"Hypothesis {hypothesis.review.decision.value}: {hypothesis.title}"
-            ),
+            summary=(f"Hypothesis {hypothesis.review.decision.value}: {hypothesis.title}"),
             detail={"reason": hypothesis.review.reason} if hypothesis.review.reason else {},
         )
         for hypothesis in hypotheses
@@ -306,12 +304,8 @@ def deliverable_events(deliverables: list[Deliverable]) -> list[AuditEvent]:
             at=deliverable.created_at,
             kind=AuditEventKind.DELIVERABLE_CREATED,
             subject=deliverable.experiment_id or deliverable.kind.value,
-            summary=(
-                f"{deliverable.kind.value.replace('_', ' ')} created: {deliverable.location}"
-            ),
-            detail=(
-                {"commit": deliverable.commit_sha} if deliverable.commit_sha else {}
-            ),
+            summary=(f"{deliverable.kind.value.replace('_', ' ')} created: {deliverable.location}"),
+            detail=({"commit": deliverable.commit_sha} if deliverable.commit_sha else {}),
         )
         for deliverable in deliverables
     ]
@@ -337,6 +331,7 @@ def unapproved_plans(plans: list[ExperimentPlan]) -> list[str]:
     return [
         plan.plan_id
         for plan in plans
-        if plan.approval is None and plan.status is not PlanStatus.PLANNED
+        if plan.approval is None
+        and plan.status is not PlanStatus.PLANNED
         and plan.status is not PlanStatus.CANCELLED
     ]

@@ -78,9 +78,7 @@ def generate(
         project = get_project(conn)
         target = _default_contract_file(project.repository.path if project else None)
         try:
-            path = generate_contract(
-                conn, output=target, force=force, target_value=target_value
-            )
+            path = generate_contract(conn, output=target, force=force, target_value=target_value)
         except ContractError as exc:
             typer.echo(str(exc))
             raise typer.Exit(code=1) from None

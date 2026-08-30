@@ -83,9 +83,7 @@ def find_duplicate(
     When several are close the most similar one is named, so the warning points
     at the best explanation of why the candidate was dropped.
     """
-    scored = [
-        (overlap(signature(candidate), signature(stored)), stored) for stored in existing
-    ]
+    scored = [(overlap(signature(candidate), signature(stored)), stored) for stored in existing]
     matches = [(score, stored) for score, stored in scored if score >= threshold]
     if not matches:
         return None

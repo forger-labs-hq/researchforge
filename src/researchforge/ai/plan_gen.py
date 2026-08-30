@@ -160,9 +160,7 @@ def _build_prompt(ctx: ExperimentContext) -> str:
         f"- patches dir: {ctx.expected_artifacts.patches_dir}\n"
     )
 
-    lines.append(
-        "## Authoring instructions\n" + "\n".join(f"- {i}" for i in ctx.instructions)
-    )
+    lines.append("## Authoring instructions\n" + "\n".join(f"- {i}" for i in ctx.instructions))
 
     lines.append(
         "\n## Task\n"
@@ -262,11 +260,7 @@ def _patches_from_files(
 
         # Only paths that exist at the baseline: a path absent from `before` is
         # a new file, and diffing it as an empty existing one would not apply.
-        before = {
-            path: content
-            for path in after
-            if (content := repo.content_of(path)) is not None
-        }
+        before = {path: content for path in after if (content := repo.content_of(path)) is not None}
         try:
             diff = synthesize_patch(before, after)
         except PatchSynthesisError as exc:

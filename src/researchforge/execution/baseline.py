@@ -115,9 +115,7 @@ def _redact_logs(paths: list[Path], secrets: dict[str, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-def summarize_repeats(
-    requested: int, values: list[float], failed: int
-) -> BaselineRepeats | None:
+def summarize_repeats(requested: int, values: list[float], failed: int) -> BaselineRepeats | None:
     """The mean and spread of the repeats that produced a number.
 
     Returns None for a single measurement: calling one run a "mean of 1" adds a
@@ -154,9 +152,7 @@ def averaged_metrics(outcomes: list[MetricResult]) -> MetricResult:
     return first.model_copy(
         update={
             "primary_metric": first.primary_metric.model_copy(
-                update={
-                    "value": sum(o.primary_metric.value for o in outcomes) / len(outcomes)
-                }
+                update={"value": sum(o.primary_metric.value for o in outcomes) / len(outcomes)}
             ),
             "secondary_metrics": {
                 name: sum(o.secondary_metrics[name] for o in outcomes) / len(outcomes)

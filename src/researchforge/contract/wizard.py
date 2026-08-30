@@ -31,7 +31,7 @@ _MINIMIZE_KEYWORDS = (
     ("time", "runtime_seconds"),
 )
 _MAXIMIZE_KEYWORDS = (
-    ("map50", "map50"),   # object detection — check before generic "map"
+    ("map50", "map50"),  # object detection — check before generic "map"
     ("map@0", "map50"),
     ("mAP", "map50"),
     ("map", "map50"),

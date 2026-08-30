@@ -62,8 +62,7 @@ def generate_queries_with_ai(
     if scan is not None:
         keywords = ", ".join(scan.keywords[:10]) if scan.keywords else "none"
         repo_context = (
-            f"\nRepository keywords: {keywords}"
-            f"\nRepository compatibility: {scan.compatibility}"
+            f"\nRepository keywords: {keywords}\nRepository compatibility: {scan.compatibility}"
         )
         if scan.readme.title:
             repo_context += f"\nProject title: {scan.readme.title}"

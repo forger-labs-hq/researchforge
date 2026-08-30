@@ -521,10 +521,7 @@ def _tooltip(
     if node.round_num is not None:
         lines.append(f"autorun round: {node.round_num}")
     chain = [route.parent for route in layout.routes if route.child == node.experiment_id]
-    lines.append(
-        "builds on: "
-        + ", ".join("baseline" if p == ROOT_KEY else p for p in chain)
-    )
+    lines.append("builds on: " + ", ".join("baseline" if p == ROOT_KEY else p for p in chain))
     if node.observation:
         lines.append(f"observed: {node.observation}")
     return f"<title>{escape(chr(10).join(lines))}</title>"

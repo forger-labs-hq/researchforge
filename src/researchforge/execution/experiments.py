@@ -822,15 +822,14 @@ def execute_run(
 
     # Stall configuration: CLI override wins; fall back to contract; None = no stall.
     stall: int | None = (
-        stall_override
-        if stall_override is not None
-        else prep.contract.spec.execution.stall
+        stall_override if stall_override is not None else prep.contract.spec.execution.stall
     )
     consecutive_non_improvements = 0
 
     if run.status is RunStatus.IN_PROGRESS:
-        all_approved = [e for e in list_experiments(conn, run.plan_id)
-                        if e.status is ExperimentStatus.APPROVED]
+        all_approved = [
+            e for e in list_experiments(conn, run.plan_id) if e.status is ExperimentStatus.APPROVED
+        ]
         for position, experiment in enumerate(all_approved, start=1):
             # Stall check BEFORE running each experiment
             if stall is not None and consecutive_non_improvements >= stall:

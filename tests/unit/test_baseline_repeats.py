@@ -147,9 +147,7 @@ class TestBaselineRunWithRepeats:
         assert "Repeats:" in result.output
         assert "(mean)" in result.output
 
-    def test_zero_runs_is_refused(
-        self, cli_runner: CliRunner, contracted_project: Path
-    ) -> None:
+    def test_zero_runs_is_refused(self, cli_runner: CliRunner, contracted_project: Path) -> None:
         result = cli_runner.invoke(app, ["baseline", "run", "--n-runs", "0"])
         assert result.exit_code != 0
 
@@ -195,9 +193,7 @@ class TestBaselineReset:
         with closing(open_project_db()) as conn:
             assert get_latest_baseline(conn) is not None
 
-    def test_force_drops_it_anyway(
-        self, cli_runner: CliRunner, validated_project: Path
-    ) -> None:
+    def test_force_drops_it_anyway(self, cli_runner: CliRunner, validated_project: Path) -> None:
         result = cli_runner.invoke(app, ["baseline", "reset", "--confirm", "--force"])
         assert result.exit_code == 0, result.output
         with closing(open_project_db()) as conn:
@@ -210,9 +206,7 @@ class TestBaselineReset:
 
         with closing(open_project_db()) as conn:
             before = [e.experiment_id for e in list_experiments(conn)]
-        assert cli_runner.invoke(
-            app, ["baseline", "reset", "--confirm", "--force"]
-        ).exit_code == 0
+        assert cli_runner.invoke(app, ["baseline", "reset", "--confirm", "--force"]).exit_code == 0
         with closing(open_project_db()) as conn:
             after = [e.experiment_id for e in list_experiments(conn)]
         assert before == after
@@ -220,9 +214,7 @@ class TestBaselineReset:
     def test_json_output_names_the_dependents(
         self, cli_runner: CliRunner, validated_project: Path
     ) -> None:
-        result = cli_runner.invoke(
-            app, ["baseline", "reset", "--confirm", "--force", "--json"]
-        )
+        result = cli_runner.invoke(app, ["baseline", "reset", "--confirm", "--force", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["removed"] >= 1

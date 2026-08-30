@@ -255,9 +255,7 @@ class TestThreeRoundsOnTheExample:
         assert example_loop.parents_seen[1] == "exp-001"
         assert example_loop.parents_seen[2] == "exp-002"
 
-    def test_the_compounded_experiment_records_its_lineage(
-        self, example_loop: ScriptedAI
-    ) -> None:
+    def test_the_compounded_experiment_records_its_lineage(self, example_loop: ScriptedAI) -> None:
         _run()
 
         with closing(open_project_db()) as conn:
@@ -290,17 +288,13 @@ class TestThreeRoundsOnTheExample:
         assert "Round 2" in log
         assert "0.9" in log
 
-    def test_the_ai_is_shown_the_log_before_re_synthesizing(
-        self, example_loop: ScriptedAI
-    ) -> None:
+    def test_the_ai_is_shown_the_log_before_re_synthesizing(self, example_loop: ScriptedAI) -> None:
         _run()
 
         assert example_loop.logs_seen, "re-synthesis should be given the running log"
         assert "Round 1" in example_loop.logs_seen[-1]
 
-    def test_the_loop_is_resumable_from_its_persisted_state(
-        self, example_loop: ScriptedAI
-    ) -> None:
+    def test_the_loop_is_resumable_from_its_persisted_state(self, example_loop: ScriptedAI) -> None:
         from researchforge.autorun.state import load_state
 
         _run()

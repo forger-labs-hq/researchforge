@@ -175,9 +175,7 @@ class TestAutorunState:
         assert autorun_state_path().is_file()
         assert autorun_state_path().name == "autorun.json"
 
-    def test_corrupt_state_is_refused_rather_than_guessed(
-        self, isolated_project_dir: Path
-    ) -> None:
+    def test_corrupt_state_is_refused_rather_than_guessed(self, isolated_project_dir: Path) -> None:
         path = autorun_state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{not json", encoding="utf-8")

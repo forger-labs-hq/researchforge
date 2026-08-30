@@ -60,7 +60,8 @@ def plan_command(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
         ),
     ] = None,
@@ -96,10 +97,15 @@ def plan_command(
                 typer.echo("No pending hypotheses. Run `researchforge research synthesize` first.")
                 raise typer.Exit(code=0)
             if not json_output:
-                typer.echo(f"  Found {len(pending)} pending hypothesis(es): "
-                           f"{', '.join(h.hypothesis_id for h in pending)}")
+                typer.echo(
+                    f"  Found {len(pending)} pending hypothesis(es): "
+                    f"{', '.join(h.hypothesis_id for h in pending)}"
+                )
             plan_ids = plan_all_hypotheses(
-                conn, pending, provider, model,
+                conn,
+                pending,
+                provider,
+                model,
                 parent_experiment_id=None,
                 on_progress=None if json_output else lambda m: typer.echo(f"  {m}"),
             )
@@ -139,8 +145,7 @@ def plan_command(
         typer.echo("  B) Ask Claude / Cursor to read the context and write:")
         typer.echo(f"       - {context.expected_artifacts.plan_path}")
         typer.echo(
-            "       - one unified diff per variant under "
-            f"{context.expected_artifacts.patches_dir}/"
+            f"       - one unified diff per variant under {context.expected_artifacts.patches_dir}/"
         )
         typer.echo("     Then import the plan:")
         typer.echo("       researchforge experiment import .researchforge/experiments/plan.yaml")
@@ -193,13 +198,18 @@ def plan_command(
         result, plan = import_experiment_plan(conn, plan_path)
 
     if json_output:
-        typer.echo(json.dumps({
-            "plan_path": str(plan_path),
-            "ok": result.ok,
-            "errors": result.errors,
-            "warnings": result.warnings,
-            "plan_id": plan.plan_id if plan else None,
-        }, indent=2))
+        typer.echo(
+            json.dumps(
+                {
+                    "plan_path": str(plan_path),
+                    "ok": result.ok,
+                    "errors": result.errors,
+                    "warnings": result.warnings,
+                    "plan_id": plan.plan_id if plan else None,
+                },
+                indent=2,
+            )
+        )
         return
 
     if result.ok and plan:
@@ -431,8 +441,7 @@ def run_command(
         from researchforge.utils.progress import LiveProgress
 
         n_experiments = sum(
-            1 for e in _list_exp(conn, prep.plan.plan_id)
-            if e.status.value == "approved"
+            1 for e in _list_exp(conn, prep.plan.plan_id) if e.status.value == "approved"
         )
         label = f"Running {n_experiments} experiment{'s' if n_experiments != 1 else ''}"
         with LiveProgress(label, enabled=not json_output) as live:
@@ -809,8 +818,6 @@ def validate_command(
             f"({summary.succeeded_attempts}/{summary.attempts} attempts, {spread})"
         )
         if summary.stdev_exceeded:
-            typer.echo(
-                f"  rejected for spread: σ exceeds the {summary.stdev_max:.4g} limit"
-            )
+            typer.echo(f"  rejected for spread: σ exceeds the {summary.stdev_max:.4g} limit")
     if any(s.outcome is ExperimentStatus.VALIDATED for s in outcome.summaries):
         typer.echo("Next: researchforge ship branch")

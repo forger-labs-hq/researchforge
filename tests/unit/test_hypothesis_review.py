@@ -81,9 +81,7 @@ class TestNewHypothesesAreUnreviewed:
         assert stored.status is HypothesisStatus.SPECULATIVE
         assert stored.review is None
 
-    def test_an_unreviewed_hypothesis_can_still_be_planned(
-        self, initialized_project: Path
-    ) -> None:
+    def test_an_unreviewed_hypothesis_can_still_be_planned(self, initialized_project: Path) -> None:
         _store([_hypothesis("hyp-001", "Caching")])
         with closing(open_project_db()) as conn:
             stored = get_hypothesis(conn, "hyp-001")

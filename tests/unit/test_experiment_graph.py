@@ -379,9 +379,7 @@ class TestMergeExecution:
         result = cli_runner.invoke(app, ["experiment", "start", str(plan), "--yes"])
         assert result.exit_code == 0, result.output
 
-        report = json.loads(
-            cli_runner.invoke(app, ["results", "show", "run-001", "--json"]).output
-        )
+        report = json.loads(cli_runner.invoke(app, ["results", "show", "run-001", "--json"]).output)
         rows = {row["experiment_id"]: row for row in report["candidates"]}
         # accuracy alone: f1 0.85 at 150ms. latency alone: f1 0.81 at 120ms.
         # The merge shows accuracy's f1 AND latency's ms — only reachable if
@@ -410,8 +408,7 @@ class TestMergeExecution:
         plan = _stage_merge_plan(isolated_project_dir)
         assert cli_runner.invoke(app, ["experiment", "start", str(plan), "--yes"]).exit_code == 0
         assert (
-            cli_runner.invoke(app, ["validate", "run-001", "-e", "exp-004", "--yes"]).exit_code
-            == 0
+            cli_runner.invoke(app, ["validate", "run-001", "-e", "exp-004", "--yes"]).exit_code == 0
         )
 
         ship = cli_runner.invoke(app, ["ship", "branch", "exp-004", "--yes", "--json"])
@@ -456,9 +453,7 @@ class TestAuthoredMerge:
         result = cli_runner.invoke(app, ["experiment", "start", str(plan), "--yes"])
         assert result.exit_code == 0, result.output
 
-        report = json.loads(
-            cli_runner.invoke(app, ["results", "show", "run-002", "--json"]).output
-        )
+        report = json.loads(cli_runner.invoke(app, ["results", "show", "run-002", "--json"]).output)
         row = next(r for r in report["candidates"] if r["experiment_id"] == "exp-005")
         # IMPROVEMENT=9 and LATENCY=90 come from the authored patch only; the
         # ancestors would have set 5 and 120, and would not have applied at all.
@@ -472,17 +467,14 @@ class TestAuthoredMerge:
         _run_diamond(cli_runner, isolated_project_dir)
         plan = _stage_authored_merge(
             isolated_project_dir,
-            COMBINED_ENTRY
-            + "  - {key: refine, title: Refine the combination, change_summary: r, "
+            COMBINED_ENTRY + "  - {key: refine, title: Refine the combination, change_summary: r, "
             "patch_file: patches/refine.patch, parent: combined}\n",
         )
 
         result = cli_runner.invoke(app, ["experiment", "start", str(plan), "--yes"])
         assert result.exit_code == 0, result.output
 
-        report = json.loads(
-            cli_runner.invoke(app, ["results", "show", "run-002", "--json"]).output
-        )
+        report = json.loads(cli_runner.invoke(app, ["results", "show", "run-002", "--json"]).output)
         values = {r["experiment_id"]: r["primary_value"] for r in report["candidates"]}
         assert values["exp-005"] == 0.89
         assert values["exp-006"] == 0.91
@@ -494,8 +486,7 @@ class TestAuthoredMerge:
         plan = _stage_authored_merge(isolated_project_dir, COMBINED_ENTRY)
         assert cli_runner.invoke(app, ["experiment", "start", str(plan), "--yes"]).exit_code == 0
         assert (
-            cli_runner.invoke(app, ["validate", "run-002", "-e", "exp-005", "--yes"]).exit_code
-            == 0
+            cli_runner.invoke(app, ["validate", "run-002", "-e", "exp-005", "--yes"]).exit_code == 0
         )
 
         ship = cli_runner.invoke(app, ["ship", "branch", "exp-005", "--yes", "--json"])

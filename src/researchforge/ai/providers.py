@@ -22,6 +22,7 @@ from typing import Protocol, runtime_checkable
 # Provider protocol
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class AiProvider(Protocol):
     """Minimal text-generation interface every provider must implement."""
@@ -36,6 +37,7 @@ class AiProvider(Protocol):
 # Anthropic (Claude)
 # ---------------------------------------------------------------------------
 
+
 class AnthropicProvider:
     """Anthropic Claude provider using the official SDK."""
 
@@ -43,9 +45,7 @@ class AnthropicProvider:
         try:
             from anthropic import Anthropic
         except ImportError as exc:
-            raise RuntimeError(
-                "anthropic SDK not installed. Run: pip install anthropic"
-            ) from exc
+            raise RuntimeError("anthropic SDK not installed. Run: pip install anthropic") from exc
         self._client = Anthropic(api_key=api_key)
         self._model = model
 
@@ -67,6 +67,7 @@ class AnthropicProvider:
 # ---------------------------------------------------------------------------
 # Google Gemini
 # ---------------------------------------------------------------------------
+
 
 class GeminiProvider:
     """Google Gemini provider using the google-genai SDK."""
@@ -105,6 +106,7 @@ class GeminiProvider:
 # OpenAI (and compatible endpoints: Ollama, etc.)
 # ---------------------------------------------------------------------------
 
+
 class OpenAIProvider:
     """OpenAI (or any OpenAI-compatible) provider."""
 
@@ -117,9 +119,7 @@ class OpenAIProvider:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError(
-                "openai SDK not installed. Run: pip install openai"
-            ) from exc
+            raise RuntimeError("openai SDK not installed. Run: pip install openai") from exc
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
 
@@ -180,9 +180,7 @@ def get_provider(
         if provider_hint in ("google", "gemini"):
             key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
             if not key:
-                raise RuntimeError(
-                    "GEMINI_API_KEY (or GOOGLE_API_KEY) is not set."
-                )
+                raise RuntimeError("GEMINI_API_KEY (or GOOGLE_API_KEY) is not set.")
             model = model_hint or rf_llm or "gemini-2.0-flash"
             return GeminiProvider(key, model)
 
@@ -193,10 +191,7 @@ def get_provider(
             model = model_hint or rf_llm or "gpt-4o"
             return OpenAIProvider(key, model)
 
-        raise RuntimeError(
-            f"Unknown provider '{provider_hint}'. "
-            "Use: anthropic | google | openai"
-        )
+        raise RuntimeError(f"Unknown provider '{provider_hint}'. Use: anthropic | google | openai")
 
     # 2 ── infer from RESEARCHFORGE_LLM
     if rf_llm:

@@ -144,17 +144,13 @@ def run_synthesis(
     with closing(open_project_db()) as conn:
         project = get_project(conn)
         if project is None or project.objective is None:
-            raise RuntimeError(
-                "No project configured. Run `researchforge project create` first."
-            )
+            raise RuntimeError("No project configured. Run `researchforge project create` first.")
         scan = get_latest_scan(conn)
         settings = load_settings()
         bundle = build_context(conn, project, scan, settings)
 
         if not bundle.papers:
-            raise RuntimeError(
-                "No papers stored. Run `researchforge research search` first."
-            )
+            raise RuntimeError("No papers stored. Run `researchforge research search` first.")
 
     if results_context:
         bundle = _with_results(bundle, results_context)
@@ -185,9 +181,7 @@ def run_synthesis(
 
         landscape_result = import_landscape(conn, landscape_path, project.id)
         if results_context:
-            additions = import_additional_hypotheses(
-                conn, hypotheses_path, project.id, settings
-            )
+            additions = import_additional_hypotheses(conn, hypotheses_path, project.id, settings)
             return SynthesisOutcome(
                 landscape_path=landscape_path,
                 hypotheses_path=hypotheses_path,

@@ -20,25 +20,29 @@ from pathlib import Path
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SetupFix:
     """A candidate fix to attempt."""
+
     new_command: str
     description: str
-    is_last_resort: bool = False   # True = no more automatic attempts after this
+    is_last_resort: bool = False  # True = no more automatic attempts after this
 
 
 @dataclass
 class SetupDiagnosis:
     """Outcome of pattern analysis."""
-    fixes: list[SetupFix]             # ordered: try first to last
-    docker_hint: str | None = None    # shown if all fixes fail
-    raw_cause: str = ""               # one-line human-readable root cause
+
+    fixes: list[SetupFix]  # ordered: try first to last
+    docker_hint: str | None = None  # shown if all fixes fail
+    raw_cause: str = ""  # one-line human-readable root cause
 
 
 # ---------------------------------------------------------------------------
 # Pattern rules
 # ---------------------------------------------------------------------------
+
 
 def _requirements_files(repo_root: Path) -> list[str]:
     candidates = [
@@ -75,26 +79,24 @@ def diagnose(
     # ── Rule 0: benchmark script not committed to git ───────────────────────
     # `generate eval-script` creates the file on disk but if the user forgets
     # to commit it, the worktree (checked out at baseline commit) won't have it.
-    if (
-        "no such file or directory" in text
-        and (
-            "benchmarks/evaluate.py" in stderr
-            or "evaluate.py" in stderr
-        )
+    if "no such file or directory" in text and (
+        "benchmarks/evaluate.py" in stderr or "evaluate.py" in stderr
     ):
         cause = "benchmark script missing from git — file exists on disk but was never committed"
         # Auto-fix: stage + commit the script then let the baseline retry
         for candidate in ["benchmarks/evaluate.py", "evaluate.py", "benchmarks/eval.py"]:
             if (repo_root / candidate).is_file():
-                fixes.append(SetupFix(
-                    new_command=(
-                        f"git add {candidate} src/config.py src/__init__.py 2>/dev/null || true; "
-                        "git commit -m 'chore: add ResearchForge benchmark script' "
-                        "2>/dev/null || true; "
-                        f"{current_command}"
-                    ),
-                    description=f"committing {candidate} to git so the worktree can find it",
-                ))
+                fixes.append(
+                    SetupFix(
+                        new_command=(
+                            f"git add {candidate} src/config.py src/__init__.py 2>/dev/null || true; "
+                            "git commit -m 'chore: add ResearchForge benchmark script' "
+                            "2>/dev/null || true; "
+                            f"{current_command}"
+                        ),
+                        description=f"committing {candidate} to git so the worktree can find it",
+                    )
+                )
                 break
         docker_hint = None  # no Docker needed — it's a git issue
         return SetupDiagnosis(fixes=fixes, docker_hint=docker_hint, raw_cause=cause)
@@ -112,46 +114,55 @@ def diagnose(
         cause = "pyproject.toml has no build backend — pip install -e . is not usable"
         if req_files:
             # Fix A: plain requirements install (works when setuptools not re-upgraded)
-            fixes.append(SetupFix(
-                new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
-                description=f"switching to {req_files[0]} (pyproject.toml has no build backend)",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
+                    description=f"switching to {req_files[0]} (pyproject.toml has no build backend)",
+                )
+            )
             # Fix B: --no-build-isolation prevents pip from building the local
             # directory even when setuptools 70+ is present in the requirements.
-            fixes.append(SetupFix(
-                new_command=(
-                    f"pip install --upgrade pip && "
-                    f"pip install --no-build-isolation -r {req_files[0]}"
-                ),
-                description=(
-                    "using --no-build-isolation to skip local-package build "
-                    "(setuptools 70+ workaround)"
-                ),
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        f"pip install --upgrade pip && "
+                        f"pip install --no-build-isolation -r {req_files[0]}"
+                    ),
+                    description=(
+                        "using --no-build-isolation to skip local-package build "
+                        "(setuptools 70+ workaround)"
+                    ),
+                )
+            )
             # Fix C: cd to /tmp so setuptools cannot see the local pyproject.toml.
             # Use an absolute path captured at invocation time.
-            fixes.append(SetupFix(
-                new_command=(
-                    f'abs_req="$(pwd)/{req_files[0]}"; '
-                    f"pip install --upgrade pip setuptools wheel && "
-                    f'pip install -r "$abs_req"'
-                ),
-                description="running pip from /tmp to avoid local pyproject.toml detection",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        f'abs_req="$(pwd)/{req_files[0]}"; '
+                        f"pip install --upgrade pip setuptools wheel && "
+                        f'pip install -r "$abs_req"'
+                    ),
+                    description="running pip from /tmp to avoid local pyproject.toml detection",
+                )
+            )
             # Fix D: pin setuptools to < 70 to restore lenient flat-layout behaviour
-            fixes.append(SetupFix(
-                new_command=(
-                    f"pip install 'setuptools<70' pip wheel && "
-                    f"{_req_install(req_files)}"
-                ),
-                description="pinning setuptools<70 to bypass flat-layout strictness",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        f"pip install 'setuptools<70' pip wheel && {_req_install(req_files)}"
+                    ),
+                    description="pinning setuptools<70 to bypass flat-layout strictness",
+                )
+            )
         else:
-            fixes.append(SetupFix(
-                new_command="pip install --upgrade pip setuptools wheel",
-                description="no requirements.txt found — upgrading pip/setuptools only",
-                is_last_resort=True,
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command="pip install --upgrade pip setuptools wheel",
+                    description="no requirements.txt found — upgrading pip/setuptools only",
+                    is_last_resort=True,
+                )
+            )
         docker_hint = (
             "This repo's pyproject.toml layout is incompatible with venv mode.\n"
             "Docker is the reliable fix — RF can generate a working Dockerfile:\n"
@@ -171,21 +182,25 @@ def diagnose(
         base = f"pip install --upgrade pip setuptools wheel && {current_command}"
         fixes.append(SetupFix(new_command=base, description="upgrading pip/setuptools/wheel first"))
         if req_files:
-            fixes.append(SetupFix(
-                new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
-                description=f"upgrading pip then installing from {req_files[0]}",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
+                    description=f"upgrading pip then installing from {req_files[0]}",
+                )
+            )
 
     # ── Rule 3: missing pip in the venv ─────────────────────────────────────
     elif "no module named pip" in text or "pip is not installed" in text:
         cause = "pip missing from the virtual environment"
-        fixes.append(SetupFix(
-            new_command=(
-                "python -m ensurepip --upgrade && pip install --upgrade pip && "
-                f"{current_command}"
-            ),
-            description="bootstrapping pip with ensurepip first",
-        ))
+        fixes.append(
+            SetupFix(
+                new_command=(
+                    "python -m ensurepip --upgrade && pip install --upgrade pip && "
+                    f"{current_command}"
+                ),
+                description="bootstrapping pip with ensurepip first",
+            )
+        )
 
     # ── Rule 4: git/network errors ──────────────────────────────────────────
     elif (
@@ -198,10 +213,12 @@ def diagnose(
         cause = "network error during package download"
         if req_files:
             # Try installing what's already in the venv cache / skip git deps
-            fixes.append(SetupFix(
-                new_command=f"pip install --no-deps -r {req_files[0]}",
-                description="trying --no-deps to skip network-fetched transitive packages",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=f"pip install --no-deps -r {req_files[0]}",
+                    description="trying --no-deps to skip network-fetched transitive packages",
+                )
+            )
         docker_hint = (
             "Network issues may be due to a proxy or firewall.\n"
             "Set HTTPS_PROXY or use an offline Docker image:\n"
@@ -220,10 +237,12 @@ def diagnose(
         cause = "C extension compilation failed — compiler missing in venv environment"
         if req_files:
             # Try pre-built wheels only
-            fixes.append(SetupFix(
-                new_command=f"pip install --only-binary=:all: -r {req_files[0]}",
-                description="trying --only-binary to avoid compiling C extensions",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=f"pip install --only-binary=:all: -r {req_files[0]}",
+                    description="trying --only-binary to avoid compiling C extensions",
+                )
+            )
         docker_hint = (
             "This package requires a C compiler. Docker provides a complete build environment:\n"
             "  researchforge generate dockerfile\n"
@@ -244,14 +263,16 @@ def diagnose(
                 (f for f in req_files if "cpu" in f.lower()),
                 req_files[0],
             )
-            fixes.append(SetupFix(
-                new_command=(
-                    "pip install --upgrade pip && "
-                    f"pip install -r {cpu_req} "
-                    "--extra-index-url https://download.pytorch.org/whl/cpu"
-                ),
-                description="trying CPU-only PyTorch wheel (no CUDA required)",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        "pip install --upgrade pip && "
+                        f"pip install -r {cpu_req} "
+                        "--extra-index-url https://download.pytorch.org/whl/cpu"
+                    ),
+                    description="trying CPU-only PyTorch wheel (no CUDA required)",
+                )
+            )
         docker_hint = (
             "For GPU workloads, use a CUDA Docker image:\n"
             "  researchforge generate dockerfile --cuda\n"
@@ -261,10 +282,12 @@ def diagnose(
     # ── Rule 7: permission denied ────────────────────────────────────────────
     elif "permission denied" in text or "errno 13" in text:
         cause = "permission denied during package install"
-        fixes.append(SetupFix(
-            new_command=current_command.replace("pip install", "pip install --user"),
-            description="retrying with --user install flag",
-        ))
+        fixes.append(
+            SetupFix(
+                new_command=current_command.replace("pip install", "pip install --user"),
+                description="retrying with --user install flag",
+            )
+        )
         docker_hint = (
             "If running as a restricted user, Docker is more reliable:\n"
             "  researchforge generate dockerfile"
@@ -273,10 +296,12 @@ def diagnose(
     # ── Rule 8: disk space ───────────────────────────────────────────────────
     elif "no space left" in text or "disk quota exceeded" in text:
         cause = "disk full during package install"
-        fixes.append(SetupFix(
-            new_command=f"pip cache purge && {current_command}",
-            description="clearing pip cache before retry (frees disk space)",
-        ))
+        fixes.append(
+            SetupFix(
+                new_command=f"pip cache purge && {current_command}",
+                description="clearing pip cache before retry (frees disk space)",
+            )
+        )
         docker_hint = "Free up disk space or move the project to a larger volume."
 
     # ── Rule 9: version conflict / resolver ─────────────────────────────────
@@ -288,22 +313,25 @@ def diagnose(
     ):
         cause = "conflicting package versions in requirements"
         if req_files:
-            fixes.append(SetupFix(
-                new_command=(
-                    f"pip install --upgrade pip && pip install -r {req_files[0]} --no-deps"
-                ),
-                description=(
-                    "installing without resolving transitive deps "
-                    "(faster, may skip conflicts)"
-                ),
-            ))
-            fixes.append(SetupFix(
-                new_command=(
-                    "pip install --upgrade pip && "
-                    f"pip install -r {req_files[0]} --upgrade-strategy eager"
-                ),
-                description="upgrading all packages eagerly to resolve conflicts",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        f"pip install --upgrade pip && pip install -r {req_files[0]} --no-deps"
+                    ),
+                    description=(
+                        "installing without resolving transitive deps (faster, may skip conflicts)"
+                    ),
+                )
+            )
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        "pip install --upgrade pip && "
+                        f"pip install -r {req_files[0]} --upgrade-strategy eager"
+                    ),
+                    description="upgrading all packages eagerly to resolve conflicts",
+                )
+            )
         docker_hint = (
             "Complex dependency conflicts are best solved in a Docker image:\n"
             "  researchforge generate dockerfile"
@@ -329,13 +357,15 @@ def diagnose(
         cause = "package not available for this Python version / platform"
         if req_files:
             # Try without the failing package (user must fix manually)
-            fixes.append(SetupFix(
-                new_command=(
-                    "pip install --upgrade pip && "
-                    f"pip install -r {req_files[0]} --ignore-requires-python"
-                ),
-                description="ignoring Python version constraints on packages",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=(
+                        "pip install --upgrade pip && "
+                        f"pip install -r {req_files[0]} --ignore-requires-python"
+                    ),
+                    description="ignoring Python version constraints on packages",
+                )
+            )
         docker_hint = (
             "Use a Docker image matching the required platform:\n"
             "  researchforge generate dockerfile"
@@ -346,10 +376,12 @@ def diagnose(
         cause = "unknown setup failure (see setup_stderr.log for details)"
         if req_files and "pip install -e" in current_command:
             # Most common fix: switch from editable to plain requirements install
-            fixes.append(SetupFix(
-                new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
-                description="falling back to requirements.txt install (pip install -e . failed)",
-            ))
+            fixes.append(
+                SetupFix(
+                    new_command=f"{_PIP_TOOLING} && {_req_install(req_files)}",
+                    description="falling back to requirements.txt install (pip install -e . failed)",
+                )
+            )
         docker_hint = (
             "If the error is environment-specific, Docker provides a clean slate:\n"
             "  researchforge generate dockerfile"

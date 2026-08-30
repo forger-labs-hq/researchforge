@@ -41,13 +41,12 @@ def search(
         typer.Option("--query", "-q", help="Search query (repeatable). Omit to auto-generate."),
     ] = None,
     max_candidates: Annotated[int | None, typer.Option("--max-candidates", min=10)] = None,
-    select: Annotated[
-        int | None, typer.Option("--select", "--n", "-n", min=1)
-    ] = None,
+    select: Annotated[int | None, typer.Option("--select", "--n", "-n", min=1)] = None,
     categories: Annotated[
         list[str] | None,
         typer.Option(
-            "--categories", "-c",
+            "--categories",
+            "-c",
             help="arXiv category filter (repeatable). E.g. cs.CV cs.LG",
         ),
     ] = None,
@@ -69,7 +68,8 @@ def search(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider for query generation: anthropic|google|openai. "
             "Auto-detected from env when omitted.",
         ),
@@ -227,14 +227,16 @@ def synthesize(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
         ),
     ] = None,
     model: Annotated[
         str | None,
         typer.Option(
-            "--model", "-m",
+            "--model",
+            "-m",
             help="Override model name (e.g. claude-opus-4-5, gemini-2.0-flash, gpt-4o).",
         ),
     ] = None,
@@ -247,8 +249,8 @@ def synthesize(
         typer.Option(
             "--from-results",
             help="Ground the synthesis in what this project has already measured. "
-                 "New hypotheses are ADDED to the stored set, and candidates that "
-                 "restate one already on record are skipped.",
+            "New hypotheses are ADDED to the stored set, and candidates that "
+            "restate one already on record are skipped.",
         ),
     ] = False,
     run_id: Annotated[
@@ -558,9 +560,7 @@ def import_papers_command(
 
     added = sum(1 for paper in papers if paper.paper_id not in known)
     if json_output:
-        echo_json(
-            {"imported": len(papers), "added": added, "replaced": len(papers) - added}
-        )
+        echo_json({"imported": len(papers), "added": added, "replaced": len(papers) - added})
         return
     typer.echo(f"Imported {len(papers)} paper(s): {added} new, {len(papers) - added} replaced.")
     typer.echo("Next: researchforge research synthesize")

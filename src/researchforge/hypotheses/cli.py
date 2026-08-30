@@ -194,9 +194,7 @@ def review_command(json_output: JsonOption = False) -> None:
         raise typer.Exit(code=1)
 
     with closing(open_project_db()) as conn:
-        pending = [
-            h for h in list_hypotheses(conn) if h.status is HypothesisStatus.SPECULATIVE
-        ]
+        pending = [h for h in list_hypotheses(conn) if h.status is HypothesisStatus.SPECULATIVE]
     if not pending:
         typer.echo("Nothing to review — every hypothesis has been approved or rejected.")
         return
@@ -209,9 +207,11 @@ def review_command(json_output: JsonOption = False) -> None:
         for index, hypothesis in enumerate(pending, start=1):
             typer.echo(f"── {index}/{len(pending)} " + "─" * 48)
             _print_hypothesis(hypothesis)
-            choice = typer.prompt(
-                "\n[a]pprove / [r]eject / [s]kip", default="s", show_default=True
-            ).strip().lower()
+            choice = (
+                typer.prompt("\n[a]pprove / [r]eject / [s]kip", default="s", show_default=True)
+                .strip()
+                .lower()
+            )
             if choice.startswith("a"):
                 record_review(conn, hypothesis.hypothesis_id, HypothesisStatus.APPROVED)
                 approved += 1
@@ -252,7 +252,8 @@ def generate_command(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
         ),
     ] = None,

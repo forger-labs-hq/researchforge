@@ -22,7 +22,8 @@ def eval_script_command(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
         ),
     ] = None,
@@ -50,9 +51,7 @@ def eval_script_command(
             help="Write files here instead of the cwd. Defaults to the project root.",
         ),
     ] = None,
-    force: Annotated[
-        bool, typer.Option("--force", help="Overwrite existing files.")
-    ] = False,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing files.")] = False,
     json_output: JsonOption = False,
 ) -> None:
     """Generate benchmarks/evaluate.py and src/config.py using a built-in AI provider.
@@ -92,6 +91,7 @@ def eval_script_command(
             )
             raise typer.Exit(code=1)
         import shutil
+
         shutil.copy2(existing, eval_path)
         if json_output:
             typer.echo(_json.dumps({"eval_script": str(eval_path), "source": str(existing)}))
@@ -265,7 +265,8 @@ def dockerfile_command(
     provider: Annotated[
         str | None,
         typer.Option(
-            "--provider", "-p",
+            "--provider",
+            "-p",
             help="AI provider: anthropic|google|openai. Omit to use a minimal heuristic template.",
         ),
     ] = None,
@@ -328,13 +329,16 @@ def dockerfile_command(
     content: str | None = None
     used_ai = False
 
-    if provider or any([
-        __import__("os").environ.get("ANTHROPIC_API_KEY"),
-        __import__("os").environ.get("GEMINI_API_KEY"),
-        __import__("os").environ.get("OPENAI_API_KEY"),
-    ]):
+    if provider or any(
+        [
+            __import__("os").environ.get("ANTHROPIC_API_KEY"),
+            __import__("os").environ.get("GEMINI_API_KEY"),
+            __import__("os").environ.get("OPENAI_API_KEY"),
+        ]
+    ):
         try:
             from researchforge.ai.service import resolve_provider
+
             ai_provider = resolve_provider(provider_hint=provider, model_hint=model)
             if not json_output:
                 typer.echo(f"Generating Dockerfile with {ai_provider.name}…")
@@ -353,6 +357,7 @@ def dockerfile_command(
 
     if json_output:
         import json
+
         typer.echo(json.dumps({"dockerfile": str(dockerfile_path), "used_ai": used_ai}))
         return
 

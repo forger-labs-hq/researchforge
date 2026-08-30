@@ -123,9 +123,7 @@ ARXIV_DATE_CEILING = "999912312359"
 """An upper bound no submission can exceed. arXiv's date range needs both ends."""
 
 
-def build_search_query(
-    query: str, categories: list[str], submitted_since: date | None
-) -> str:
+def build_search_query(query: str, categories: list[str], submitted_since: date | None) -> str:
     """The arXiv `search_query` for one search, with its filters applied.
 
     Filtering by date at the API rather than after fetching matters: the fetch

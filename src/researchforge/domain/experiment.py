@@ -320,8 +320,4 @@ class ValidationSummary(BaseModel):
     @property
     def stdev_exceeded(self) -> bool:
         """Whether the measured spread broke the limit the run was held to."""
-        return (
-            self.stdev_max is not None
-            and self.stdev is not None
-            and self.stdev > self.stdev_max
-        )
+        return self.stdev_max is not None and self.stdev is not None and self.stdev > self.stdev_max

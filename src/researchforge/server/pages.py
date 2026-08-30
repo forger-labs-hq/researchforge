@@ -888,9 +888,7 @@ def experiment_page(state: ProjectState, experiment_id: str) -> str:
         (h for h in state.hypotheses if h.hypothesis_id == experiment.hypothesis_id), None
     )
     children = [e for e in state.experiments if experiment_id in e.parent_experiment_ids]
-    parents = [
-        e for e in state.experiments if e.experiment_id in experiment.parent_experiment_ids
-    ]
+    parents = [e for e in state.experiments if e.experiment_id in experiment.parent_experiment_ids]
     parent = parents[0] if parents else None
     baseline_value = (
         state.baseline.metrics.primary_metric.value

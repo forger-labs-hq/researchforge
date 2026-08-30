@@ -145,9 +145,7 @@ def update_log_after_round(
         best_experiment, best_value, baseline_value, metric_name, direction
     )
     if re.search(BEST_SECTION_PATTERN, existing, re.DOTALL):
-        updated = re.sub(
-            BEST_SECTION_PATTERN, best_section.rstrip(), existing, flags=re.DOTALL
-        )
+        updated = re.sub(BEST_SECTION_PATTERN, best_section.rstrip(), existing, flags=re.DOTALL)
     else:
         updated = existing + "\n" + best_section
     log_file.write_text(updated + "\n".join(lines), encoding="utf-8")

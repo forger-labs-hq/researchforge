@@ -115,9 +115,7 @@ class TestWritePatchFiles:
     def test_creates_the_directory_and_returns_every_path(self, tmp_path: Path) -> None:
         patches_dir = tmp_path / "deep" / "patches"
 
-        written = write_patch_files(
-            patches_dir, {"patches/a.patch": PATCH, "b.patch": PATCH}
-        )
+        written = write_patch_files(patches_dir, {"patches/a.patch": PATCH, "b.patch": PATCH})
 
         assert sorted(p.name for p in written) == ["a.patch", "b.patch"]
 
@@ -203,9 +201,7 @@ class TestPatchesFromRewrittenFiles:
         entry = yaml.safe_load(plan_yaml)["experiments"][0]
         assert entry["patch_file"] == "patches/imgsz-800.patch"
 
-    def test_hunk_headers_come_from_the_real_file(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_hunk_headers_come_from_the_real_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The offsets a model used to guess wrong are now git's arithmetic."""
         changed = CONFIG.replace("LR0 = 0.01", "LR0 = 0.001")
         _, patches = _generate(

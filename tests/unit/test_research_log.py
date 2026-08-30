@@ -169,9 +169,7 @@ class TestRoundUpdate:
         )
         winner = _experiment("exp-001", "int8 quantization", ExperimentStatus.PROMISING)
 
-        update_log_after_round(
-            log, 1, [winner], 10.0, "inference_ms", winner, 8.0, MINIMIZE
-        )
+        update_log_after_round(log, 1, [winner], 10.0, "inference_ms", winner, 8.0, MINIMIZE)
 
         text = log.read_text(encoding="utf-8")
         assert "Current best: exp-001" in text

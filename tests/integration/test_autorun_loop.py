@@ -396,9 +396,7 @@ class TestGraphDrivenPlanning:
 
         assert any("Expanding" in message for message in messages)
 
-    def test_overlapping_winners_are_re_authored_into_one_patch(
-        self, fake_ai: FakeAI
-    ) -> None:
+    def test_overlapping_winners_are_re_authored_into_one_patch(self, fake_ai: FakeAI) -> None:
         """Both winners create src/algo.py, so composition cannot combine them."""
         fake_ai.improvements = [5, 3, 0]
 
@@ -411,9 +409,7 @@ class TestGraphDrivenPlanning:
         assert result.best_metric_value == pytest.approx(0.88)
         assert len(result.rounds) == 3
 
-    def test_the_re_authored_merge_keeps_both_parents_as_lineage(
-        self, fake_ai: FakeAI
-    ) -> None:
+    def test_the_re_authored_merge_keeps_both_parents_as_lineage(self, fake_ai: FakeAI) -> None:
         fake_ai.improvements = [5, 3, 0]
 
         _run(AutorunConfig(global_stall=99, max_rounds=3, compound=False, merge=True, yes=True))
@@ -444,9 +440,7 @@ class TestGraphDrivenPlanning:
 
 
 class TestObservations:
-    def test_each_experiment_gets_an_observation_from_its_own_logs(
-        self, fake_ai: FakeAI
-    ) -> None:
+    def test_each_experiment_gets_an_observation_from_its_own_logs(self, fake_ai: FakeAI) -> None:
         fake_ai.improvements = [5, 0]
 
         _run(AutorunConfig(global_stall=99, max_rounds=2, observe=True, yes=True))
@@ -456,9 +450,7 @@ class TestObservations:
         assert experiment is not None
         assert experiment.observation == "Loss was still falling at the last epoch."
 
-    def test_the_observer_is_shown_the_run_output_and_the_change(
-        self, fake_ai: FakeAI
-    ) -> None:
+    def test_the_observer_is_shown_the_run_output_and_the_change(self, fake_ai: FakeAI) -> None:
         fake_ai.improvements = [5, 0]
 
         _run(AutorunConfig(global_stall=99, max_rounds=1, observe=True, yes=True))

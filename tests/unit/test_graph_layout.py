@@ -40,15 +40,11 @@ class TestResolvedParents:
         assert parents["exp-002"] == [ROOT_KEY]
 
     def test_a_partly_present_merge_keeps_only_what_is_drawn(self) -> None:
-        parents = resolved_parents(
-            ["exp-001", "exp-003"], {"exp-003": ["exp-001", "exp-002"]}
-        )
+        parents = resolved_parents(["exp-001", "exp-003"], {"exp-003": ["exp-001", "exp-002"]})
         assert parents["exp-003"] == ["exp-001"]
 
     def test_a_repeated_parent_is_listed_once(self) -> None:
-        parents = resolved_parents(
-            ["exp-001", "exp-002"], {"exp-002": ["exp-001", "exp-001"]}
-        )
+        parents = resolved_parents(["exp-001", "exp-002"], {"exp-002": ["exp-001", "exp-001"]})
         assert parents["exp-002"] == ["exp-001"]
 
     def test_a_node_cannot_be_its_own_parent(self) -> None:
@@ -119,9 +115,7 @@ class TestLayoutGeometry:
 
     def test_siblings_do_not_overlap(self) -> None:
         cards = _cards(layout_graph(["exp-001", "exp-002", "exp-003"], {}))
-        first, second, third = sorted(
-            (cards["exp-001"].y, cards["exp-002"].y, cards["exp-003"].y)
-        )
+        first, second, third = sorted((cards["exp-001"].y, cards["exp-002"].y, cards["exp-003"].y))
         assert second - first >= METRICS.node_h
         assert third - second >= METRICS.node_h
 
@@ -167,9 +161,7 @@ class TestLongEdges:
     def test_the_long_edge_clears_every_card_it_passes(self) -> None:
         layout = self._spanning_layout()
         route = _route(layout, "exp-001", "exp-004")
-        intermediate = [
-            card for card in layout.cards if card.key in {"exp-002", "exp-003"}
-        ]
+        intermediate = [card for card in layout.cards if card.key in {"exp-002", "exp-003"}]
         for x, y in route.points:
             for card in intermediate:
                 inside_x = card.x < x < card.x + METRICS.node_w
@@ -196,9 +188,7 @@ class TestFanOut:
             {"exp-003": ["exp-001"], "exp-004": ["exp-002"]},
         )
         turns = {
-            route.points[1][0]
-            for route in layout.routes
-            if route.parent in {"exp-001", "exp-002"}
+            route.points[1][0] for route in layout.routes if route.parent in {"exp-001", "exp-002"}
         }
         assert len(turns) == 2
 

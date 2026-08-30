@@ -310,9 +310,7 @@ class TestForkAwareShipPr:
         assert "PUBLIC fork" in result.output
 
         forks = [c for c in readonly_runner.calls if c[:3] == ["gh", "repo", "fork"]]
-        assert forks == [
-            ["gh", "repo", "fork", "acme/repo", "--remote", "--remote-name", "fork"]
-        ]
+        assert forks == [["gh", "repo", "fork", "acme/repo", "--remote", "--remote-name", "fork"]]
 
         pushes = [c for c in readonly_runner.calls if c[:2] == ["git", "push"]]
         assert len(pushes) == 1

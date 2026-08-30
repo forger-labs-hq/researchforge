@@ -104,7 +104,7 @@ def build_minimal_dockerfile(scan: RepoScan) -> str:
         "# Copy project",
         "COPY . .",
         "",
-        '# ResearchForge runs: python benchmarks/evaluate.py',
+        "# ResearchForge runs: python benchmarks/evaluate.py",
         'CMD ["python", "benchmarks/evaluate.py"]',
     ]
 

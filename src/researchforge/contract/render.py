@@ -44,9 +44,7 @@ def render_contract_yaml(spec: ContractSpec) -> str:
             "    # target_value: 0.85   # optional — `autorun` stops once the metric reaches it"
         )
     else:
-        lines.append(
-            f"    target_value: {target}  # `autorun` stops once the metric reaches this"
-        )
+        lines.append(f"    target_value: {target}  # `autorun` stops once the metric reaches this")
 
     if spec.objective.hard_constraints:
         lines.append("  hard_constraints:")

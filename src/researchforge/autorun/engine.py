@@ -135,19 +135,19 @@ class AutorunResult:
 
 @dataclass
 class AutorunConfig:
-    stall: int = 2                     # per-plan stall (experiments without improvement)
-    global_stall: int = 3              # rounds with no improvement → stop
-    max_rounds: int | None = None      # hard cap on rounds
-    max_hours: float | None = None     # wall-clock safety limit
+    stall: int = 2  # per-plan stall (experiments without improvement)
+    global_stall: int = 3  # rounds with no improvement → stop
+    max_rounds: int | None = None  # hard cap on rounds
+    max_hours: float | None = None  # wall-clock safety limit
     target_value: float | None = None  # stop when the metric reaches this
-    compound: bool = True              # new experiments build on a chosen graph node
-    explore: float = 0.0               # UCB1 constant; 0 = always expand the best
-    merge: bool = False                # propose combining independent winners
-    observe: bool = False              # read each run's logs into an observation
-    resynthesize: bool = True          # generate new hypotheses each round
-    yes: bool = False                  # skip the round-1 approval gate
-    provider: str | None = None        # AI provider for synthesis + planning
-    model: str | None = None           # AI model override
+    compound: bool = True  # new experiments build on a chosen graph node
+    explore: float = 0.0  # UCB1 constant; 0 = always expand the best
+    merge: bool = False  # propose combining independent winners
+    observe: bool = False  # read each run's logs into an observation
+    resynthesize: bool = True  # generate new hypotheses each round
+    yes: bool = False  # skip the round-1 approval gate
+    provider: str | None = None  # AI provider for synthesis + planning
+    model: str | None = None  # AI model override
 
     def as_settings(self) -> dict[str, str]:
         return summarize_settings(
@@ -217,11 +217,7 @@ def get_pending_hypotheses(conn: sqlite3.Connection) -> list[Hypothesis]:
     worth trying *at a given node*. See `researchforge.autorun.frontier`.
     """
     planned = {plan.hypothesis_id for plan in list_plans(conn)}
-    return [
-        h
-        for h in list_hypotheses(conn)
-        if h.hypothesis_id not in planned and h.is_plannable
-    ]
+    return [h for h in list_hypotheses(conn) if h.hypothesis_id not in planned and h.is_plannable]
 
 
 def collect_attempts(
@@ -240,9 +236,7 @@ def collect_attempts(
     attempts: list[Attempt] = []
     for experiment in experiments:
         value = values.get(experiment.experiment_id)
-        gain = (
-            gain_over_baseline(value, baseline_value, direction) if value is not None else None
-        )
+        gain = gain_over_baseline(value, baseline_value, direction) if value is not None else None
         for parent in experiment.parent_experiment_ids or [BASELINE_NODE]:
             reference = baseline_value if parent == BASELINE_NODE else values.get(parent)
             attempts.append(
@@ -314,9 +308,7 @@ def build_graph_view(
     view.nodes.append(NodeStats(BASELINE_NODE, gain=0.0, visits=visits[BASELINE_NODE]))
     for experiment in branchable:
         value = values.get(experiment.experiment_id)
-        gain = (
-            gain_over_baseline(value, baseline_value, direction) if value is not None else 0.0
-        )
+        gain = gain_over_baseline(value, baseline_value, direction) if value is not None else 0.0
         view.nodes.append(
             NodeStats(
                 experiment.experiment_id,
@@ -331,9 +323,7 @@ def build_graph_view(
             *ancestor_order(experiment.experiment_id, parents_of),
             BASELINE_NODE,
         }
-    view.already_merged = {
-        frozenset(e.parent_experiment_ids) for e in experiments if e.is_merge
-    }
+    view.already_merged = {frozenset(e.parent_experiment_ids) for e in experiments if e.is_merge}
     return view
 
 
@@ -1172,9 +1162,7 @@ def run_autorun(
         if config.merge:
             proposal = propose_merge(view.nodes, view.ancestors_of, view.already_merged)
             if proposal is not None:
-                merged = plan_merge(
-                    conn, proposal, config.provider, config.model, on_progress
-                )
+                merged = plan_merge(conn, proposal, config.provider, config.model, on_progress)
                 if merged is not None:
                     merge_plan_ids.append(merged)
 
@@ -1206,9 +1194,7 @@ def run_autorun(
         # on the branches that never won are all that is left, so take them
         # rather than stop with the clock still running.
         if not pending and not merge_plan_ids:
-            node, pending = choose_next_move(
-                conn, view, config, loop, remaining, retreat=True
-            )
+            node, pending = choose_next_move(conn, view, config, loop, remaining, retreat=True)
 
         if not pending and not merge_plan_ids:
             result.stop_reason = (
@@ -1272,9 +1258,7 @@ def run_autorun(
 
         if improved:
             result.global_stall_count = 0
-            result.best_experiment_id = (
-                best_experiment.experiment_id if best_experiment else None
-            )
+            result.best_experiment_id = best_experiment.experiment_id if best_experiment else None
             result.best_metric_value = best_value
             _report(
                 on_progress,
@@ -1285,8 +1269,7 @@ def run_autorun(
             result.global_stall_count += 1
             _report(
                 on_progress,
-                f"  ✗ No improvement (stall "
-                f"{result.global_stall_count}/{config.global_stall})",
+                f"  ✗ No improvement (stall {result.global_stall_count}/{config.global_stall})",
             )
 
         round_experiments = [*promising, *rejected, *failed]

@@ -115,8 +115,6 @@ class LiveProgress:
         i = 0
         while not self._stop.wait(0.1):
             elapsed_str = self._fmt_elapsed()
-            sys.stderr.write(
-                f"\r  {chars[i % len(chars)]} {self._phase}  ({elapsed_str})   "
-            )
+            sys.stderr.write(f"\r  {chars[i % len(chars)]} {self._phase}  ({elapsed_str})   ")
             sys.stderr.flush()
             i += 1

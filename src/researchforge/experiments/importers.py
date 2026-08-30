@@ -250,9 +250,7 @@ def _check_patches(
     conflicts between merged branches surface here rather than mid-run.
     """
     needs_check = [
-        entry
-        for entry in artifact.experiments
-        if entry.patch_file or parents.chains.get(entry.key)
+        entry for entry in artifact.experiments if entry.patch_file or parents.chains.get(entry.key)
     ]
     if not needs_check:
         return {}
@@ -276,8 +274,10 @@ def _check_patches(
 
             applies, message = manager.apply_patch_check(scratch, patch)
             if not applies:
-                where = "on top of its ancestor chain" if chain else (
-                    f"at baseline {baseline_commit[:12]}"
+                where = (
+                    "on top of its ancestor chain"
+                    if chain
+                    else (f"at baseline {baseline_commit[:12]}")
                 )
                 result.errors.append(
                     f"experiments.{entry.key}: patch does not apply {where} — {message}"

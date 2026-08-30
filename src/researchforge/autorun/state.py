@@ -97,8 +97,7 @@ def load_state(base: Path | None = None) -> AutorunState | None:
         return AutorunState.model_validate_json(path.read_text(encoding="utf-8"))
     except (ValidationError, ValueError) as exc:
         raise AutorunStateError(
-            f"{path} is not a valid autorun state file ({exc}). "
-            "Delete it to start a fresh loop."
+            f"{path} is not a valid autorun state file ({exc}). Delete it to start a fresh loop."
         ) from exc
 
 

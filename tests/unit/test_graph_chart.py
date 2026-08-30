@@ -99,8 +99,7 @@ class TestRoundGrouping:
         )
         root = ElementTree.fromstring(svg)
         tops = {
-            card.get("data-graph-node"): float(card.get("y", 0))
-            for card in _cards(root).values()
+            card.get("data-graph-node"): float(card.get("y", 0)) for card in _cards(root).values()
         }
         assert tops["exp-001"] < tops["exp-003"] < tops["exp-002"]
 
@@ -124,9 +123,7 @@ class TestMergeEdges:
 class TestPathToBest:
     def test_the_whole_ancestry_of_the_best_is_highlighted(self) -> None:
         edges = _edges(_render(best_experiment_id="exp-004"))
-        highlighted = {
-            name for name, edge in edges.items() if edge.get("stroke-width") == "2.5"
-        }
+        highlighted = {name for name, edge in edges.items() if edge.get("stroke-width") == "2.5"}
         assert highlighted == {
             "baseline->exp-001",
             "baseline->exp-002",

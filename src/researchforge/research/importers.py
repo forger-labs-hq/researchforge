@@ -152,9 +152,7 @@ def _merge_annotations_onto_papers(
         upsert_paper(conn, project_id, updated)
 
 
-def _load_hypotheses(
-    path: Path, result: ImportResult
-) -> list[Hypothesis] | None:
+def _load_hypotheses(path: Path, result: ImportResult) -> list[Hypothesis] | None:
     """Parse and schema-check an artifact; None means the errors say why."""
     try:
         raw = load_artifact(path)
@@ -290,16 +288,13 @@ def import_additional_hypotheses(
 
     if not fresh:
         additions.result.warnings.append(
-            "hypotheses: every candidate restated one already on record; "
-            "nothing was added."
+            "hypotheses: every candidate restated one already on record; nothing was added."
         )
         return additions
 
     renumbered = [
         candidate.model_copy(update={"hypothesis_id": new_id})
-        for candidate, new_id in zip(
-            fresh, next_hypothesis_ids(conn, len(fresh)), strict=True
-        )
+        for candidate, new_id in zip(fresh, next_hypothesis_ids(conn, len(fresh)), strict=True)
     ]
     combined = [*stored, *renumbered]
     replace_hypotheses(conn, project_id, combined)

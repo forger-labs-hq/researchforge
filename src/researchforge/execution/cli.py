@@ -151,8 +151,7 @@ def run(
         _print_run(result)
         if result.status is BaselineStatus.SUCCEEDED:
             typer.echo(
-                "Baseline established. "
-                "Next: researchforge experiment plan hyp-001 --synthesize"
+                "Baseline established. Next: researchforge experiment plan hyp-001 --synthesize"
             )
         else:
             typer.echo("Baseline failed — experiments are blocked until it succeeds.")

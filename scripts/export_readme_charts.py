@@ -50,12 +50,8 @@ def standalone(svg: str) -> str:
     box = re.search(r"viewBox='0 0 ([\d.]+) ([\d.]+)'", svg)
     assert box is not None, "chart has no viewBox"
     width, height = box.group(1), box.group(2)
-    svg = svg.replace(
-        "<svg ", f"<svg width='{width}' height='{height}' ", 1
-    )
-    return svg.replace(
-        ">", f"><rect width='{width}' height='{height}' fill='#ffffff'/>", 1
-    )
+    svg = svg.replace("<svg ", f"<svg width='{width}' height='{height}' ", 1)
+    return svg.replace(">", f"><rect width='{width}' height='{height}' fill='#ffffff'/>", 1)
 
 
 def main() -> None:

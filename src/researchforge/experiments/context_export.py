@@ -337,9 +337,7 @@ def build_experiment_context(
 
     staging = experiments_dir(base)
     repo_root = base if base is not None else Path.cwd()
-    overlay, applied = _lineage_content(
-        conn, repo_root, baseline.commit_sha, parent_experiment_id
-    )
+    overlay, applied = _lineage_content(conn, repo_root, baseline.commit_sha, parent_experiment_id)
     return ExperimentContext(
         generated_at=datetime.now(UTC),
         hypothesis=hypothesis,

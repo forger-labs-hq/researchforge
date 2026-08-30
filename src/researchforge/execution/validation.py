@@ -194,9 +194,7 @@ def validate_run(
             )
             attempts.append(execution)
 
-        summary = summarize_validation(
-            experiment, attempts, prep.baseline, direction, stdev_max
-        )
+        summary = summarize_validation(experiment, attempts, prep.baseline, direction, stdev_max)
         decision_reason = (
             f"validation: {summary.succeeded_attempts}/{summary.attempts} attempts "
             f"succeeded; values={summary.values}; mean={summary.mean}; "

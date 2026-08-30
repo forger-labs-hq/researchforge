@@ -73,9 +73,7 @@ class TestExport:
     ) -> None:
         _store([_paper("arxiv:2501.00001", "Routing")])
         destination = tmp_path / "papers.json"
-        result = cli_runner.invoke(
-            app, ["papers", "export", str(destination), "--json"]
-        )
+        result = cli_runner.invoke(app, ["papers", "export", str(destination), "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["path"] == str(destination)
@@ -114,9 +112,7 @@ class TestReadPapersExport:
 
     def test_a_missing_papers_key_is_rejected(self, tmp_path: Path) -> None:
         file = tmp_path / "papers.json"
-        file.write_text(
-            json.dumps({"schema_version": PAPERS_EXPORT_VERSION}), encoding="utf-8"
-        )
+        file.write_text(json.dumps({"schema_version": PAPERS_EXPORT_VERSION}), encoding="utf-8")
         with pytest.raises(ValueError, match="non-empty list"):
             read_papers_export(file)
 

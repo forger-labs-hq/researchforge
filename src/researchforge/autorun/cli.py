@@ -24,14 +24,16 @@ def autorun_command(
     stall: Annotated[
         int,
         typer.Option(
-            "--stall", min=1,
+            "--stall",
+            min=1,
             help="Stop a plan after N consecutive non-improving experiments.",
         ),
     ] = 2,
     global_stall: Annotated[
         int,
         typer.Option(
-            "--global-stall", min=1,
+            "--global-stall",
+            min=1,
             help="Stop the loop after N rounds with no improvement anywhere.",
         ),
     ] = 3,
@@ -48,7 +50,7 @@ def autorun_command(
         typer.Option(
             "--target",
             help="Stop when the primary metric reaches this value "
-                 "(defaults to the contract's objective.primary_metric.target_value).",
+            "(defaults to the contract's objective.primary_metric.target_value).",
         ),
     ] = None,
     compound: Annotated[
@@ -56,15 +58,16 @@ def autorun_command(
         typer.Option(
             "--compound/--no-compound",
             help="Each round's experiments build on a node of the experiment graph "
-                 "instead of the baseline (default: on).",
+            "instead of the baseline (default: on).",
         ),
     ] = True,
     explore: Annotated[
         float,
         typer.Option(
-            "--explore", min=0.0,
+            "--explore",
+            min=0.0,
             help="UCB1 exploration constant. 0 always expands the current best; "
-                 "higher values revisit under-explored branches instead.",
+            "higher values revisit under-explored branches instead.",
         ),
     ] = 0.0,
     merge: Annotated[
@@ -72,8 +75,8 @@ def autorun_command(
         typer.Option(
             "--merge/--no-merge",
             help="Each round, try combining two independent winners into one "
-                 "multi-parent experiment. When their diffs overlap the AI is "
-                 "asked to author the combination as a single patch.",
+            "multi-parent experiment. When their diffs overlap the AI is "
+            "asked to author the combination as a single patch.",
         ),
     ] = False,
     observe: Annotated[
@@ -81,8 +84,8 @@ def autorun_command(
         typer.Option(
             "--observe/--no-observe",
             help="After each experiment, have the AI read its benchmark output and "
-                 "record one paragraph on what the run showed. Costs one AI call "
-                 "per experiment.",
+            "record one paragraph on what the run showed. Costs one AI call "
+            "per experiment.",
         ),
     ] = False,
     resynthesize: Annotated[
@@ -141,9 +144,7 @@ def autorun_command(
 
     with closing(open_project_db()) as conn:
         contract = get_active_contract(conn)
-        contract_target = (
-            contract.spec.objective.primary_metric.target_value if contract else None
-        )
+        contract_target = contract.spec.objective.primary_metric.target_value if contract else None
         config = AutorunConfig(
             stall=stall,
             global_stall=global_stall,
@@ -196,9 +197,7 @@ def _typed_approval(preview: PlanPreview) -> bool:
     for experiment in preview.experiments:
         files = ", ".join(experiment.changed_files) or "env overrides only"
         typer.echo(f"  {experiment.experiment_id}  {experiment.title}  [{files}]")
-    typer.echo(
-        "\nApproving lets the loop run this batch and every later round unattended."
-    )
+    typer.echo("\nApproving lets the loop run this batch and every later round unattended.")
     confirmation: str = typer.prompt("Type 'approve' to start the autonomous loop")
     return confirmation.strip().lower() == "approve"
 

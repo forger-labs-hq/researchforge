@@ -38,9 +38,7 @@ class NodeStats:
     """Children already spawned from this node."""
 
 
-def gain_over_baseline(
-    value: float, baseline_value: float, direction: MetricDirection
-) -> float:
+def gain_over_baseline(value: float, baseline_value: float, direction: MetricDirection) -> float:
     """How much this measurement improved on the baseline, floored at zero.
 
     A node that did worse than the baseline is worth zero rather than a negative
@@ -48,9 +46,7 @@ def gain_over_baseline(
     one.
     """
     raw = (
-        value - baseline_value
-        if direction is MetricDirection.MAXIMIZE
-        else baseline_value - value
+        value - baseline_value if direction is MetricDirection.MAXIMIZE else baseline_value - value
     )
     return max(0.0, raw)
 

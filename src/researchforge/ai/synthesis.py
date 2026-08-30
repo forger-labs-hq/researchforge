@@ -74,6 +74,7 @@ OUTPUT FORMAT — output EXACTLY this structure, nothing else:
 # User prompt builder
 # ---------------------------------------------------------------------------
 
+
 def _build_user_prompt(ctx: SynthesisContext) -> str:
     """Serialize the context bundle into a model-friendly prompt."""
     lines: list[str] = []
@@ -84,9 +85,7 @@ def _build_user_prompt(ctx: SynthesisContext) -> str:
         repo = ctx.repository
         kw = ", ".join(repo.keywords[:8]) if repo.keywords else "none"
         lines.append(
-            f"## Repository context\n"
-            f"- Compatibility: {repo.compatibility}\n"
-            f"- Keywords: {kw}\n"
+            f"## Repository context\n- Compatibility: {repo.compatibility}\n- Keywords: {kw}\n"
         )
 
     lines.append(f"## Papers ({len(ctx.papers)} retrieved)\n")
@@ -128,6 +127,7 @@ def _build_user_prompt(ctx: SynthesisContext) -> str:
 # ---------------------------------------------------------------------------
 # Response parser
 # ---------------------------------------------------------------------------
+
 
 def _extract_tag(text: str, tag: str) -> str | None:
     """Extract content between <tag>…</tag> from model output."""
@@ -189,6 +189,7 @@ def parse_synthesis_response(raw: str) -> tuple[dict[str, Any], dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def synthesize(
     ctx: SynthesisContext,
