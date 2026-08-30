@@ -53,7 +53,11 @@ class FakeProcessRunner:
             self.fork_created = True
             return out("created fork")
         if argv[:3] == ["git", "remote", "--verbose"]:
-            lines = [f"{name}\t{url} ({direction})" for name, url in self.remotes for direction in ("fetch", "push")]
+            lines = [
+                f"{name}\t{url} ({direction})"
+                for name, url in self.remotes
+                for direction in ("fetch", "push")
+            ]
             return out("\n".join(lines))
         if argv[:3] == ["git", "rev-list", "--count"]:
             return out(str(self.commits_ahead))

@@ -13,10 +13,10 @@ import re
 import sys
 from pathlib import Path
 
-from researchforge.reporting.dashboard import graph_nodes, progress_points
-from researchforge.reporting.svg_charts import graph_chart, progress_chart
 from researchforge.config.settings import load_settings
 from researchforge.execution.ranking import build_ranking_report
+from researchforge.reporting.dashboard import graph_nodes, progress_points
+from researchforge.reporting.svg_charts import graph_chart, progress_chart
 from researchforge.storage.baseline_repository import get_latest_successful_baseline
 from researchforge.storage.contract_repository import get_active_contract
 from researchforge.storage.db import open_project_db
