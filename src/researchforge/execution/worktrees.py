@@ -10,12 +10,14 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from researchforge.config.paths import worktrees_dir
 
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9._-]+$")
 _GIT_TIMEOUT_S = 60
+_FETCH_TIMEOUT_S = 300
 
 
 class WorktreeError(Exception):
@@ -176,6 +178,33 @@ class WorktreeManager:
 
     def parent_of(self, sha: str) -> str:
         return self._git("rev-parse", f"{sha}^")
+
+    def commit_message(self, sha: str) -> str:
+        return self._git("log", "-1", "--format=%B", "--end-of-options", sha, strip=False)
+
+    def fetch(self, source: str, ref: str) -> str:
+        """Fetch one ref from a remote name or URL; returns the fetched commit."""
+        self._git("fetch", "--no-tags", "--", source, ref, timeout=_FETCH_TIMEOUT_S)
+        return self._git("rev-parse", "FETCH_HEAD")
+
+    def blob_sha(self, commit: str, path: str) -> str | None:
+        """The blob a path resolves to at `commit`, or None when absent there."""
+        try:
+            return self._git("rev-parse", "--end-of-options", f"{commit}:{path}")
+        except WorktreeError:
+            return None
+
+    def checkout_paths(self, worktree: Path, commit: str, paths: Sequence[str]) -> None:
+        """Materialize exactly `paths` as they are at `commit` inside a worktree.
+
+        Paths absent at `commit` are deleted, so a change that removed a file
+        replays as a removal rather than being silently skipped.
+        """
+        for path in paths:
+            if self.blob_sha(commit, path) is not None:
+                self._git("-C", str(worktree), "checkout", commit, "--", path)
+            else:
+                self._git("-C", str(worktree), "rm", "-f", "--ignore-unmatch", "--", path)
 
     def diff_names(self, base: str, head: str) -> list[str]:
         output = self._git("diff", "--name-only", "-z", base, head, strip=False)

@@ -12,6 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from xml.sax.saxutils import escape
 
+from researchforge.reporting.graph_layout import (
+    ROOT_KEY,
+    Box,
+    Metrics,
+    layout_graph,
+)
+from researchforge.reporting.graph_layout import Layout as GraphLayout
+
 FONT = "font-family='ui-sans-serif, system-ui, sans-serif'"
 
 # Status -> CSS variable used as fill.
@@ -409,111 +417,307 @@ def spread_chart(rows: list[SpreadRow], baseline_value: float, metric_name: str)
 
 
 @dataclass
-class TreeNode:
+class GraphNode:
     experiment_id: str
     title: str
     status: str
     value: float | None = None
     delta_pct: float | None = None
-    parent_id: str | None = None  # None = child of the baseline root
+    parent_ids: list[str] = field(default_factory=list)
+    """Empty = child of the baseline root. More than one = a merge."""
+
+    round_num: int | None = None  # autorun round (None = single-round run)
+    observation: str | None = None
+
+    @property
+    def parent_id(self) -> str | None:
+        """The first parent — the single-lineage view, for callers that want it."""
+        return self.parent_ids[0] if self.parent_ids else None
+
+    @property
+    def is_merge(self) -> bool:
+        return len(self.parent_ids) > 1
 
 
-def tree_chart(
-    nodes: list[TreeNode],
+STATUS_BADGE = {
+    "implementation_ready": "SHIP",
+    "validated": "VALIDATED",
+    "promising": "KEPT",
+    "rejected": "REJECTED",
+    "failed_setup": "SETUP FAILED",
+    "failed_execution": "RUN FAILED",
+    "validating": "VALIDATING",
+    "cancelled": "CANCELLED",
+    "planned": "PLANNED",
+    "approved": "APPROVED",
+    "preparing": "PREPARING",
+    "running": "RUNNING",
+}
+
+LEGEND = (
+    ("baseline", BASELINE_COLOR),
+    ("shipped / validated", "var(--chart-good)"),
+    ("kept", "var(--chart-info)"),
+    ("rejected", "var(--chart-bad)"),
+    ("failed / cancelled", "var(--chart-muted)"),
+)
+
+WINNING_STATUSES = frozenset({"implementation_ready", "validated", "promising"})
+
+
+def _delta_text(delta_pct: float | None) -> str:
+    if delta_pct is None:
+        return ""
+    return f"{delta_pct:+.1f}%"
+
+
+def _inherited_from(nodes: list[GraphNode], baseline_value: float) -> dict[str, str]:
+    """Nodes that measured exactly what they were built on, and what that was.
+
+    Every card's percentage is against the frozen baseline, which is what makes
+    the graph comparable — but it means a child that changed nothing still
+    wears its parent's gain. This is how a card can say so: an exact tie with
+    everything it builds on is a change that the benchmark could not see, which
+    is worth reading as a result rather than as a win.
+    """
+    value_of = {node.experiment_id: node.value for node in nodes}
+    inherited: dict[str, str] = {}
+    for node in nodes:
+        if node.value is None:
+            continue
+        parents = node.parent_ids or [ROOT_KEY]
+        references = [
+            baseline_value if parent == ROOT_KEY else value_of.get(parent) for parent in parents
+        ]
+        if any(reference is None for reference in references):
+            continue
+        if all(node.value == reference for reference in references):
+            inherited[node.experiment_id] = " + ".join(
+                "the baseline" if parent == ROOT_KEY else parent for parent in parents
+            )
+    return inherited
+
+
+def _tooltip(
+    node: GraphNode, layout: GraphLayout, metric_name: str, inherited_from: str | None = None
+) -> str:
+    """The full detail a card has no room for, as a native SVG tooltip.
+
+    `<title>` is what a browser shows on hover without any script, which keeps
+    the dashboard a single file that works from disk.
+    """
+    lines = [f"{node.experiment_id} — {node.title}", f"status: {node.status}"]
+    if node.value is not None:
+        delta = _delta_text(node.delta_pct)
+        against = f"  ({delta} vs baseline)" if delta else ""
+        lines.append(f"{metric_name}: {_fmt(node.value)}{against}")
+        if inherited_from is not None:
+            lines.append(
+                f"no change vs {inherited_from}: this {metric_name} is inherited, "
+                "the experiment's own change measured nothing"
+            )
+    else:
+        lines.append(f"{metric_name}: not measured")
+    if node.round_num is not None:
+        lines.append(f"autorun round: {node.round_num}")
+    chain = [route.parent for route in layout.routes if route.child == node.experiment_id]
+    lines.append(
+        "builds on: "
+        + ", ".join("baseline" if p == ROOT_KEY else p for p in chain)
+    )
+    if node.observation:
+        lines.append(f"observed: {node.observation}")
+    return f"<title>{escape(chr(10).join(lines))}</title>"
+
+
+def _legend(width: float, y: float) -> str:
+    parts = [
+        f"<text x='18' y='{y}' {FONT} font-size='10' fill='var(--fg-muted)' "
+        "letter-spacing='0.4'>LEGEND</text>"
+    ]
+    x = 76.0
+    for label, color in LEGEND:
+        parts.append(
+            f"<rect x='{x}' y='{y - 8}' width='9' height='9' rx='2' fill='{color}'/>"
+            f"<text x='{x + 15}' y='{y}' {FONT} font-size='10' fill='var(--fg-muted)'>"
+            f"{escape(label)}</text>"
+        )
+        x += 26 + len(label) * 5.6
+    parts.append(
+        f"<line x1='{x + 6}' y1='{y - 4}' x2='{x + 32}' y2='{y - 4}' "
+        "stroke='var(--fg-muted)' stroke-width='1.5' stroke-dasharray='4 3'/>"
+        f"<text x='{x + 40}' y='{y}' {FONT} font-size='10' fill='var(--fg-muted)'>"
+        "merge (multi-parent)</text>"
+    )
+    return "".join(parts)
+
+
+def graph_chart(
+    nodes: list[GraphNode],
     baseline_value: float,
     metric_name: str,
     link_base: str | None = None,
+    best_experiment_id: str | None = None,
 ) -> str:
-    """The experiment tree: baseline root, one card per experiment, edges to
-    parents. Linear projects render as one column of roots — same chart."""
-    by_id = {node.experiment_id: node for node in nodes}
+    """The experiment DAG: baseline root, one card per experiment, edges to parents.
 
-    def depth_of(node: TreeNode) -> int:
-        depth, current = 0, node.parent_id
-        seen = set()
-        while current is not None and current in by_id and current not in seen:
-            seen.add(current)
-            depth += 1
-            current = by_id[current].parent_id
-        return depth
+    Positions come from `graph_layout`, so a node with several parents and an
+    edge that skips a layer are drawn as they are rather than approximated.
+    `best_experiment_id` traces that node's ancestors in the winning colour,
+    which is how the picture answers "what actually got us here".
+    """
+    # Layer membership is fixed by the graph, but the order within a layer is
+    # only a tie-break — so spend it on grouping each autorun round together.
+    keys = [
+        node.experiment_id
+        for node in sorted(nodes, key=lambda n: (n.round_num or 0, n.experiment_id))
+    ]
+    layout = layout_graph(keys, {node.experiment_id: node.parent_ids for node in nodes})
+    positions = {box.key: box for box in layout.boxes}
+    metrics = Metrics()
 
-    columns: dict[int, list[TreeNode]] = {}
-    for node in nodes:
-        columns.setdefault(depth_of(node) + 1, []).append(node)  # column 0 = baseline
+    winning_path = _path_to_best(layout, best_experiment_id)
+    inherited = _inherited_from(nodes, baseline_value)
+    legend_y = layout.height + 4
+    height = legend_y + 14
 
-    node_w, node_h, gap_x, gap_y, pad = 190, 64, 60, 18, 16
-    max_depth = max(columns.keys(), default=0)
-    rows = max([1] + [len(items) for items in columns.values()])
-    width = pad * 2 + (max_depth + 1) * node_w + max_depth * gap_x
-    height = pad * 2 + rows * node_h + (rows - 1) * gap_y
+    parts = [
+        f"<svg viewBox='0 0 {layout.width:.0f} {height:.0f}' role='img' "
+        "aria-label='Experiment graph' xmlns='http://www.w3.org/2000/svg'>"
+    ]
 
-    positions: dict[str, tuple[float, float]] = {}
-
-    def place(column: int, index: int) -> tuple[float, float]:
-        x = pad + column * (node_w + gap_x)
-        y = pad + index * (node_h + gap_y)
-        return x, y
-
-    parts = [f"<svg viewBox='0 0 {width} {height}' role='img' xmlns='http://www.w3.org/2000/svg'>"]
-    # Baseline root card.
-    bx, by = place(0, 0)
-    parts.append(
-        f"<rect x='{bx}' y='{by}' width='{node_w}' height='{node_h}' rx='8' "
-        f"fill='var(--card)' stroke='{BASELINE_COLOR}' stroke-width='1.5' "
-        "data-tree-node='baseline'/>"
-        f"<text x='{bx + 10}' y='{by + 24}' {FONT} font-size='12' font-weight='bold' "
-        f"fill='{BASELINE_COLOR}'>baseline</text>"
-        f"<text x='{bx + 10}' y='{by + 44}' {FONT} font-size='12' fill='var(--fg)'>"
-        f"{escape(metric_name)} = {_fmt(baseline_value)}</text>"
-    )
-    positions["__baseline__"] = (bx, by)
-
-    for column in sorted(k for k in columns if k > 0):
-        for index, node in enumerate(columns[column]):
-            x, y = place(column, index)
-            positions[node.experiment_id] = (x, y)
-            value_text = _fmt(node.value) if node.value is not None else "—"
-            if node.delta_pct is not None:
-                value_text += f" ({node.delta_pct:+.1f}%)"
-            title = node.title if len(node.title) <= 26 else node.title[:25] + "…"
-            card = (
-                f"<rect x='{x}' y='{y}' width='{node_w}' height='{node_h}' rx='8' "
-                f"fill='var(--card)' stroke='{status_color(node.status)}' stroke-width='1.5' "
-                f"data-tree-node='{escape(node.experiment_id)}' "
-                f"data-status='{escape(node.status)}'/>"
-                f"<text x='{x + 10}' y='{y + 20}' {FONT} font-size='11' font-weight='bold' "
-                f"fill='var(--fg)'>{escape(node.experiment_id)}</text>"
-                f"<text x='{x + 10}' y='{y + 36}' {FONT} font-size='10' "
-                f"fill='var(--fg-muted)'>{escape(title)}</text>"
-                f"<text x='{x + 10}' y='{y + 54}' {FONT} font-size='11' "
-                f"fill='{status_color(node.status)}'>{escape(value_text)} · "
-                f"{escape(node.status)}</text>"
-            )
-            if link_base is not None:
-                card = f"<a href='{link_base}/{escape(node.experiment_id)}'>{card}</a>"
-            parts.append(card)
-
-    # Edges under the cards (prepend after svg open so cards draw on top).
-    edges = []
-    for node in nodes:
-        child = positions.get(node.experiment_id)
-        if child is None:
-            continue
-        parent = (
-            positions.get(node.parent_id)
-            if node.parent_id is not None and node.parent_id in positions
-            else positions["__baseline__"]
-        )
-        if parent is None:
-            parent = positions["__baseline__"]
-        x1, y1 = parent[0] + node_w, parent[1] + node_h / 2
-        x2, y2 = child[0], child[1] + node_h / 2
-        mid = (x1 + x2) / 2
+    edges: list[str] = []
+    for route in layout.routes:
+        child = next((n for n in nodes if n.experiment_id == route.child), None)
+        on_path = (route.parent, route.child) in winning_path
+        if on_path:
+            stroke, width_px = "var(--chart-good)", "2.5"
+        elif child is not None and child.status in WINNING_STATUSES:
+            stroke, width_px = status_color(child.status), "2"
+        else:
+            stroke, width_px = "var(--grid)", "1.5"
+        dashes = " stroke-dasharray='5 4'" if child is not None and child.is_merge else ""
+        points = " ".join(f"{x:.1f},{y:.1f}" for x, y in route.points)
+        label = "baseline" if route.parent == ROOT_KEY else route.parent
         edges.append(
-            f"<polyline points='{x1},{y1} {mid},{y1} {mid},{y2} {x2},{y2}' fill='none' "
-            f"stroke='var(--grid)' stroke-width='1.5' data-tree-edge='"
-            f"{escape(node.parent_id or 'baseline')}->{escape(node.experiment_id)}'/>"
+            f"<polyline points='{points}' fill='none' stroke='{stroke}' "
+            f"stroke-width='{width_px}' stroke-linecap='round'{dashes} "
+            f"data-graph-edge='{escape(label)}->{escape(route.child)}'/>"
         )
-    parts.insert(1, "".join(edges))
+    parts.append("".join(edges))
+
+    root = positions[ROOT_KEY]
+    parts.append(
+        f"<rect x='{root.x}' y='{root.y}' width='{metrics.node_w}' "
+        f"height='{metrics.node_h}' rx='10' fill='var(--card)' "
+        f"stroke='{BASELINE_COLOR}' stroke-width='2' data-graph-node='baseline'/>"
+        f"<text x='{root.x + 12}' y='{root.y + 22}' {FONT} font-size='11' font-weight='700' "
+        f"fill='{BASELINE_COLOR}' letter-spacing='0.5'>BASELINE</text>"
+        f"<text x='{root.x + 12}' y='{root.y + 42}' {FONT} font-size='12' fill='var(--fg)'>"
+        f"{escape(metric_name)} = {_fmt(baseline_value)}</text>"
+        f"<text x='{root.x + 12}' y='{root.y + 61}' {FONT} font-size='10' "
+        "fill='var(--fg-muted)'>frozen reference for every measurement</text>"
+    )
+
+    for node in nodes:
+        box = positions.get(node.experiment_id)
+        if box is None:
+            continue
+        card = _graph_card(
+            node,
+            box,
+            metrics,
+            metric_name,
+            layout,
+            on_winning_path=node.experiment_id in {c for _, c in winning_path},
+            inherited_from=inherited.get(node.experiment_id),
+        )
+        if link_base is not None:
+            card = f"<a href='{link_base}/{escape(node.experiment_id)}'>{card}</a>"
+        parts.append(card)
+
+    parts.append(_legend(layout.width, legend_y))
     parts.append("</svg>")
+    return "".join(parts)
+
+
+def _path_to_best(layout: GraphLayout, best_experiment_id: str | None) -> set[tuple[str, str]]:
+    """The edges on the ancestor chain of the best node, as (parent, child).
+
+    Every ancestor counts, not just one lineage: a merge got there through both
+    its parents and highlighting only the first would misreport the history.
+    """
+    if best_experiment_id is None:
+        return set()
+    edges: set[tuple[str, str]] = set()
+    frontier = [best_experiment_id]
+    seen = {best_experiment_id}
+    while frontier:
+        current = frontier.pop()
+        for route in layout.routes:
+            if route.child != current:
+                continue
+            edges.add((route.parent, route.child))
+            if route.parent not in seen:
+                seen.add(route.parent)
+                frontier.append(route.parent)
+    return edges
+
+
+def _graph_card(
+    node: GraphNode,
+    box: Box,
+    metrics: Metrics,
+    metric_name: str,
+    layout: GraphLayout,
+    on_winning_path: bool,
+    inherited_from: str | None = None,
+) -> str:
+    color = status_color(node.status)
+    badge = STATUS_BADGE.get(node.status, node.status.upper())
+    if node.is_merge:
+        badge = f"{badge} · MERGE"
+    if inherited_from is not None:
+        badge = f"{badge} · NO CHANGE"
+    title_room = 26 if node.round_num is not None else 31
+    title = node.title if len(node.title) <= title_room else node.title[: title_room - 1] + "…"
+    left, top = box.x, box.y
+
+    parts = [
+        f"<rect x='{left}' y='{top}' width='{metrics.node_w}' height='{metrics.node_h}' "
+        f"rx='10' fill='var(--card)' stroke='{color}' "
+        f"stroke-width='{2.5 if on_winning_path else 1.5}' "
+        f"data-graph-node='{escape(node.experiment_id)}' "
+        f"data-status='{escape(node.status)}'"
+        + (f" data-round='{node.round_num}'" if node.round_num is not None else "")
+        + "/>",
+        _tooltip(node, layout, metric_name, inherited_from),
+        f"<text x='{left + 12}' y='{top + 21}' {FONT} font-size='11' font-weight='700' "
+        f"fill='var(--fg)'>{escape(node.experiment_id)}</text>",
+        f"<text x='{left + 12}' y='{top + 40}' {FONT} font-size='10' "
+        f"fill='var(--fg-muted)'>{escape(title)}</text>",
+        f"<text x='{left + 12}' y='{top + 61}' {FONT} font-size='9.5' font-weight='600' "
+        f"fill='{color}' letter-spacing='0.3'>{escape(badge)}</text>",
+    ]
+
+    delta = _delta_text(node.delta_pct)
+    if delta:
+        pill_w = 14 + len(delta) * 6.0
+        parts.append(
+            f"<rect x='{left + metrics.node_w - 12 - pill_w}' y='{top + 10}' "
+            f"width='{pill_w:.1f}' height='16' rx='8' fill='{color}' opacity='0.16'/>"
+            f"<text x='{left + metrics.node_w - 12 - pill_w / 2}' y='{top + 21.5}' {FONT} "
+            f"font-size='10' font-weight='700' text-anchor='middle' fill='{color}' "
+            f"data-graph-delta='{escape(node.experiment_id)}'>{escape(delta)}</text>"
+        )
+    if node.round_num is not None:
+        parts.append(
+            f"<text x='{left + metrics.node_w - 12}' y='{top + 40}' {FONT} font-size='9.5' "
+            f"text-anchor='end' fill='var(--fg-muted)'>R{node.round_num}</text>"
+        )
+    value_text = _fmt(node.value) if node.value is not None else "not measured"
+    parts.append(
+        f"<text x='{left + metrics.node_w - 12}' y='{top + 61}' {FONT} font-size='10' "
+        f"text-anchor='end' fill='var(--fg)'>{escape(value_text)}</text>"
+    )
     return "".join(parts)

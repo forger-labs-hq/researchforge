@@ -14,6 +14,7 @@ from researchforge.domain.experiment import (
     PlanStatus,
     RunStatus,
 )
+from researchforge.experiments.graph import ParentsFn
 
 
 def _next_sequential_id(conn: sqlite3.Connection, table: str, column: str, prefix: str) -> int:
@@ -132,6 +133,35 @@ def get_experiment(conn: sqlite3.Connection, experiment_id: str) -> Experiment |
         "SELECT record FROM experiments WHERE experiment_id = ?", (experiment_id,)
     ).fetchone()
     return Experiment.model_validate_json(row["record"]) if row is not None else None
+
+
+def stored_parents(conn: sqlite3.Connection) -> ParentsFn:
+    """Lineage lookup for graph walks over experiments already persisted."""
+
+    def parents_of(experiment_id: str) -> list[str]:
+        stored = get_experiment(conn, experiment_id)
+        return list(stored.parent_experiment_ids) if stored else []
+
+    return parents_of
+
+
+def patch_ancestry(conn: sqlite3.Connection) -> ParentsFn:
+    """Lineage lookup for composing patches, rather than for showing provenance.
+
+    An experiment whose patch already contains its parents' changes reads as a
+    root here: applying those parents again would conflict with the very diff
+    that was written to replace them.  The walk therefore stops at such a node
+    for its descendants too, which is exactly what they need — the node's own
+    patch carries the whole combined state.
+    """
+
+    def parents_of(experiment_id: str) -> list[str]:
+        stored = get_experiment(conn, experiment_id)
+        if stored is None or stored.patch_includes_parents:
+            return []
+        return list(stored.parent_experiment_ids)
+
+    return parents_of
 
 
 def list_experiments(conn: sqlite3.Connection, plan_id: str | None = None) -> list[Experiment]:

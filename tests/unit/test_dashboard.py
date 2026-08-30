@@ -280,22 +280,22 @@ class TestDashboardCommand:
 
 
 class TestDashboardV2:
-    def test_tree_chart_nodes_and_edges(self) -> None:
-        from researchforge.reporting.svg_charts import TreeNode, tree_chart
+    def test_graph_chart_nodes_and_edges(self) -> None:
+        from researchforge.reporting.svg_charts import GraphNode, graph_chart
 
-        svg = tree_chart(
+        svg = graph_chart(
             [
-                TreeNode("exp-001", "Root", "promising", 0.85, 6.2, None),
-                TreeNode("exp-002", "Loser", "rejected", 0.82, 2.9, None),
-                TreeNode("exp-003", "Child", "validated", 0.87, 8.7, "exp-001"),
+                GraphNode("exp-001", "Root", "promising", 0.85, 6.2),
+                GraphNode("exp-002", "Loser", "rejected", 0.82, 2.9),
+                GraphNode("exp-003", "Child", "validated", 0.87, 8.7, ["exp-001"]),
             ],
             baseline_value=0.8,
             metric_name="f1",
         )
         root = _parse(svg)
-        nodes = {e.get("data-tree-node") for e in root.iter() if e.get("data-tree-node")}
+        nodes = {e.get("data-graph-node") for e in root.iter() if e.get("data-graph-node")}
         assert nodes == {"baseline", "exp-001", "exp-002", "exp-003"}
-        edges = {e.get("data-tree-edge") for e in root.iter() if e.get("data-tree-edge")}
+        edges = {e.get("data-graph-edge") for e in root.iter() if e.get("data-graph-edge")}
         assert edges == {
             "baseline->exp-001",
             "baseline->exp-002",
@@ -303,8 +303,8 @@ class TestDashboardV2:
         }
         assert "<a " not in svg  # static rendering: no links
 
-        linked = tree_chart(
-            [TreeNode("exp-001", "Root", "promising", 0.85, None, None)],
+        linked = graph_chart(
+            [GraphNode("exp-001", "Root", "promising", 0.85)],
             baseline_value=0.8,
             metric_name="f1",
             link_base="/experiments",
@@ -322,7 +322,7 @@ class TestDashboardV2:
         assert "0.85" in html and "+6.2%" in html  # winner + delta vs baseline 0.80
         assert "1 kept · 1 discarded · 0 err" in html
         assert "frontier" in html
-        assert "Experiment tree" in html
-        assert "data-tree-node='baseline'" in html
-        assert "data-tree-edge='baseline-&gt;exp-001'" in html or "baseline->exp-001" in html
+        assert "Experiment graph" in html
+        assert "data-graph-node='baseline'" in html
+        assert "data-graph-edge='baseline-&gt;exp-001'" in html or "baseline->exp-001" in html
         assert "<script" not in html  # static file stays script-free

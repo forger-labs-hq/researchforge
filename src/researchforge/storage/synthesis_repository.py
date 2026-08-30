@@ -45,3 +45,15 @@ def replace_landscape(
 def get_landscape(conn: sqlite3.Connection) -> ResearchLandscape | None:
     row = conn.execute("SELECT record FROM landscape ORDER BY imported_at DESC LIMIT 1").fetchone()
     return ResearchLandscape.model_validate_json(row["record"]) if row is not None else None
+
+
+def landscape_imported_at(conn: sqlite3.Connection) -> datetime | None:
+    """When the stored landscape was imported, for reporting a project's history.
+
+    The time lives in the table rather than on the model: it says when this
+    project took the landscape in, which is not a property of the landscape.
+    """
+    row = conn.execute(
+        "SELECT imported_at FROM landscape ORDER BY imported_at DESC LIMIT 1"
+    ).fetchone()
+    return datetime.fromisoformat(row["imported_at"]) if row is not None else None

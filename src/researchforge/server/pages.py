@@ -6,10 +6,12 @@ from html import escape
 from pathlib import Path
 
 from researchforge import __version__
-from researchforge.domain.experiment import BenchmarkStage, ExperimentExecution
+from researchforge.domain.contract import MetricDirection
+from researchforge.domain.experiment import BenchmarkStage, Experiment, ExperimentExecution
 from researchforge.domain.paper import Paper
 from researchforge.reporting.dashboard import DASHBOARD_CSS
-from researchforge.reporting.svg_charts import status_color
+from researchforge.reporting.svg_charts import GraphNode, graph_chart, status_color
+from researchforge.research.research_log import improvement_pct
 from researchforge.server.data import ProjectState
 
 _NAV = (
@@ -37,6 +39,17 @@ details.session > summary { cursor: pointer; padding: 12px 0; font-weight: 600;
 details.session > summary .sub { font-weight: 400; }
 details.session[open] { padding-bottom: 12px; }
 details.session table { background: var(--bg); border-radius: 6px; }
+
+/* ── Experiment graph ────────────────────────────────────────────── */
+/* A wide DAG scrolls sideways rather than shrinking every card to
+   illegibility, and each card is a link, so it gets a hover affordance. */
+.graph { overflow-x: auto; padding-bottom: 6px; }
+.graph svg { min-width: 100%; height: auto; }
+.graph a { cursor: pointer; }
+.graph a rect[data-graph-node] { transition: opacity 120ms ease-in-out; }
+.graph a:hover rect[data-graph-node] { opacity: 0.72; }
+.graph a:focus-visible rect[data-graph-node] { outline: 2px solid var(--brand);
+  outline-offset: 2px; }
 
 /* ── Research page ───────────────────────────────────────────────── */
 .query-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
@@ -612,8 +625,92 @@ def run_page(state: ProjectState, run_id: str) -> str:
     )
 
 
+def measured_value(state: ProjectState, experiment_id: str) -> float | None:
+    """The latest non-screening value recorded for an experiment, if any."""
+    return next(
+        (
+            execution.metrics.primary_metric.value
+            for execution in reversed(state.executions)
+            if execution.experiment_id == experiment_id
+            and execution.metrics is not None
+            and execution.benchmark_stage is not BenchmarkStage.SCREENING
+        ),
+        None,
+    )
+
+
+def _graph_node(
+    experiment: Experiment,
+    value: float | None,
+    baseline_value: float,
+    direction: MetricDirection,
+    round_num: int | None,
+) -> GraphNode:
+    return GraphNode(
+        experiment_id=experiment.experiment_id,
+        title=experiment.title,
+        status=experiment.status.value,
+        value=value,
+        delta_pct=(
+            improvement_pct(value, baseline_value, direction) if value is not None else None
+        ),
+        parent_ids=list(experiment.parent_experiment_ids),
+        round_num=round_num,
+        observation=experiment.observation,
+    )
+
+
+def project_graph(state: ProjectState) -> str:
+    """The whole project's experiment DAG, with every card a link to its page.
+
+    Rendered from every experiment on record rather than one run's, because the
+    lineage that matters — which winner a merge combined, where a branch was
+    picked up again — crosses runs.
+    """
+    from researchforge.autorun.state import load_state, rounds_by_experiment
+
+    if state.baseline is None or state.baseline.metrics is None or not state.experiments:
+        return ""
+
+    baseline_metric = state.baseline.metrics.primary_metric
+    direction = (
+        state.contract.spec.objective.primary_metric.direction
+        if state.contract is not None
+        else MetricDirection.MAXIMIZE
+    )
+    rounds = rounds_by_experiment(load_state())
+    nodes = [
+        _graph_node(
+            experiment,
+            measured_value(state, experiment.experiment_id),
+            baseline_metric.value,
+            direction,
+            rounds.get(experiment.experiment_id),
+        )
+        for experiment in state.experiments
+    ]
+    best = max(
+        (node for node in nodes if node.delta_pct is not None),
+        key=lambda node: node.delta_pct or 0.0,
+        default=None,
+    )
+    chart = graph_chart(
+        nodes,
+        baseline_metric.value,
+        baseline_metric.name,
+        link_base=f"{state.link_prefix}/experiments",
+        best_experiment_id=best.experiment_id if best is not None else None,
+    )
+    return (
+        f"<h2>Experiment graph</h2><div class='graph'>{chart}</div>"
+        "<p class='sub'>Click a card to open that experiment. Dotted edges are "
+        "merges of several parents; the green chain traces the ancestry of the "
+        "best result so far.</p>"
+    )
+
+
 def experiments_page(state: ProjectState) -> str:
-    body = ["<h1>Experiments</h1>"]
+    body = ["<h1>Experiments</h1>", project_graph(state)]
     if not state.runs:
         body.append(
             guidance_card(
@@ -781,7 +878,7 @@ def session_page(state: ProjectState, run_id: str) -> str:
 
 def experiment_page(state: ProjectState, experiment_id: str) -> str:
     """Everything recorded about one experiment: the click-through from the
-    tree, run pages, and results tables."""
+    graph, run pages, and results tables."""
     experiment = next(e for e in state.experiments if e.experiment_id == experiment_id)
     executions = sorted(
         (e for e in state.executions if e.experiment_id == experiment_id),
@@ -790,11 +887,11 @@ def experiment_page(state: ProjectState, experiment_id: str) -> str:
     hypothesis = next(
         (h for h in state.hypotheses if h.hypothesis_id == experiment.hypothesis_id), None
     )
-    children = [e for e in state.experiments if e.parent_experiment_id == experiment_id]
-    parent = next(
-        (e for e in state.experiments if e.experiment_id == experiment.parent_experiment_id),
-        None,
-    )
+    children = [e for e in state.experiments if experiment_id in e.parent_experiment_ids]
+    parents = [
+        e for e in state.experiments if e.experiment_id in experiment.parent_experiment_ids
+    ]
+    parent = parents[0] if parents else None
     baseline_value = (
         state.baseline.metrics.primary_metric.value
         if state.baseline is not None and state.baseline.metrics is not None
@@ -854,11 +951,18 @@ def experiment_page(state: ProjectState, experiment_id: str) -> str:
             f"{escape(hypothesis.claim)}</p>"
         )
     lineage = []
-    if parent is not None:
+    label = "parent" if len(parents) < 2 else "merged parent"
+    for ancestor in parents:
         lineage.append(
-            f"<li>parent: <a href='{state.link_prefix}/experiments/{escape(parent.experiment_id)}'>"
-            f"{escape(parent.experiment_id)}</a> ({escape(parent.title)}, "
-            f"{escape(parent.status.value)})</li>"
+            f"<li>{label}: "
+            f"<a href='{state.link_prefix}/experiments/{escape(ancestor.experiment_id)}'>"
+            f"{escape(ancestor.experiment_id)}</a> ({escape(ancestor.title)}, "
+            f"{escape(ancestor.status.value)})</li>"
+        )
+    if experiment.patch_includes_parents:
+        lineage.append(
+            "<li class='sub'>this experiment's patch was re-authored to contain both "
+            "parents' changes, so their diffs are not applied again</li>"
         )
     for child in children:
         child_value = latest_value(child.experiment_id)
@@ -874,6 +978,12 @@ def experiment_page(state: ProjectState, experiment_id: str) -> str:
         body.append(
             f"<h2>Decision</h2><p>{escape(experiment.decision.outcome.value)} — "
             f"{escape(experiment.decision.reason)}</p>"
+        )
+    if experiment.observation:
+        body.append(
+            f"<h2>Observed</h2><p>{escape(experiment.observation)}</p>"
+            "<p class='sub'>Read from this run's own benchmark output. Commentary on "
+            "the run — the decision above rests on the measurement, not on this.</p>"
         )
     body.append(
         "<h2>Change</h2><ul>"

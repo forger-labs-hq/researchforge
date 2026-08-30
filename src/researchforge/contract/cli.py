@@ -64,6 +64,13 @@ def _print_summary(contract: ExperimentContract) -> None:
 @contract_app.command()
 def generate(
     force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
+    target_value: Annotated[
+        float | None,
+        typer.Option(
+            "--target",
+            help="Optional metric value that satisfies the objective — `autorun` stops there.",
+        ),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Generate a researchforge.yaml draft from the project and repository scan."""
@@ -71,7 +78,9 @@ def generate(
         project = get_project(conn)
         target = _default_contract_file(project.repository.path if project else None)
         try:
-            path = generate_contract(conn, output=target, force=force)
+            path = generate_contract(
+                conn, output=target, force=force, target_value=target_value
+            )
         except ContractError as exc:
             typer.echo(str(exc))
             raise typer.Exit(code=1) from None

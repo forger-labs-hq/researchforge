@@ -31,9 +31,15 @@ from researchforge.domain.experiment import (
 from researchforge.execution.baseline import BaselineBlockedError, baseline_gate
 from researchforge.execution.path_guard import check_changed_paths
 from researchforge.execution.worktrees import WorktreeError, WorktreeManager
-from researchforge.experiments.context_export import PATCHES_DIR_NAME, ExperimentPlanArtifact
+from researchforge.experiments.context_export import (
+    PATCHES_DIR_NAME,
+    ExperimentPlanArtifact,
+    PlannedExperimentEntry,
+)
+from researchforge.experiments.graph import GraphCycleError, ancestor_order
 from researchforge.storage.contract_repository import get_active_contract
 from researchforge.storage.experiment_repository import (
+    get_experiment,
     insert_plan,
     next_experiment_ids,
     next_plan_id,
@@ -64,12 +70,26 @@ def _format_validation_error(exc: ValidationError) -> list[str]:
     return messages
 
 
+def _patch_candidate(patch_file: str, base: Path | None) -> Path:
+    """Where `patch_file` points, resolved against the experiments directory.
+
+    A bare file name is taken to mean the patches directory, since that is the
+    only place a patch may live and an author who wrote `foo.patch` meant
+    `patches/foo.patch`. Anything with a directory component is resolved as
+    written, so an attempt to escape the tree is still caught by the caller.
+    """
+    root = experiments_dir(base)
+    if Path(patch_file).parent == Path("."):
+        return (root / PATCHES_DIR_NAME / patch_file).resolve()
+    return (root / patch_file).resolve()
+
+
 def _load_patch(
     entry_key: str, patch_file: str, base: Path | None, errors: list[str]
 ) -> Path | None:
     """Resolve and sanity-check a patch file; returns its path or records errors."""
     patches_root = (experiments_dir(base) / PATCHES_DIR_NAME).resolve()
-    candidate = (experiments_dir(base) / patch_file).resolve()
+    candidate = _patch_candidate(patch_file, base)
     where = f"experiments.{entry_key}.patch_file"
     if not candidate.is_relative_to(patches_root):
         errors.append(f"{where}: must live inside {patches_root} (got {patch_file!r}).")
@@ -99,107 +119,207 @@ _BRANCHABLE_STATUSES = frozenset(
     }
 )
 
+MERGE_CONFLICT_PREFIX = "merge conflict"
+
+
+@dataclass
+class ParentResolution:
+    """Per-entry ancestry, resolved and validated before anything runs."""
+
+    chains: dict[str, list[str]] = field(default_factory=dict)
+    """Ancestor patch texts in dependency order (roots first), own patch excluded."""
+
+    declared: dict[str, list[str]] = field(default_factory=dict)
+    """Ancestor references as the author wrote them: plan keys or exp-NNN ids."""
+
+
+def _read_entry_patch(entry: PlannedExperimentEntry, base: Path | None) -> str:
+    """An entry's own patch text, or "" when it has none.
+
+    Patch files are validated properly in Layer 3; here we only need the text
+    for chain composition, so a missing or out-of-tree file reads as empty and
+    the later layer reports it.
+    """
+    if not entry.patch_file:
+        return ""
+    patches_root = (experiments_dir(base) / PATCHES_DIR_NAME).resolve()
+    candidate = _patch_candidate(entry.patch_file, base)
+    if not candidate.is_relative_to(patches_root):
+        return ""
+    try:
+        return candidate.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
 
 def _resolve_parents(
     conn: sqlite3.Connection,
     artifact: ExperimentPlanArtifact,
     result: ImportResult,
     base: Path | None = None,
-) -> tuple[dict[str, list[str]], dict[str, str | None]]:
-    """Ancestor patch texts (root->parent, excluding the entry's own patch) and
-    the immediate parent's experiment id ('' marks a same-plan key resolved
-    to its assigned id later) for every entry.
+) -> ParentResolution:
+    """Validate every declared ancestor and order the patches they contribute.
+
+    Ancestors may be keys in this same plan or `exp-NNN` ids already stored, and
+    an entry may declare several of them (a merge).  Stored ancestors must be
+    measured experiments: a plan cannot branch from something that never ran.
+
+    A node marked `patch_includes_parents` contributes no chain: its own patch
+    is the combined state, so its parents are lineage rather than something to
+    apply.  Chains stop there for its descendants as well.
     """
-    from researchforge.storage.experiment_repository import get_experiment
-
     entries = {entry.key: entry for entry in artifact.experiments}
-    chains: dict[str, list[str]] = {}
-    parents: dict[str, str | None] = {}
+    resolution = ParentResolution()
+    stored: dict[str, Experiment] = {}
 
-    def db_chain(experiment_id: str, where: str) -> list[str] | None:
-        """Patch texts for experiment_id's full ancestor chain, root first."""
-        texts: list[str] = []
+    def stored_experiment(experiment_id: str, where: str) -> Experiment | None:
+        if experiment_id in stored:
+            return stored[experiment_id]
+        experiment = get_experiment(conn, experiment_id)
+        if experiment is None:
+            result.errors.append(f"{where}: unknown parent experiment {experiment_id!r}.")
+            return None
+        if experiment.status not in _BRANCHABLE_STATUSES:
+            result.errors.append(
+                f"{where}: parent {experiment_id} is {experiment.status.value} — only "
+                "measured experiments (promising/rejected/validated/"
+                "implementation_ready) can be branched on."
+            )
+            return None
+        stored[experiment_id] = experiment
+        return experiment
+
+    def parents_of(node: str) -> list[str]:
+        entry = entries.get(node)
+        if entry is not None:
+            return [] if entry.patch_includes_parents else entry.declared_parents
+        experiment = stored.get(node)
+        if experiment is None or experiment.patch_includes_parents:
+            return []
+        return list(experiment.parent_experiment_ids)
+
+    def patch_text_of(node: str) -> str:
+        entry = entries.get(node)
+        if entry is not None:
+            return _read_entry_patch(entry, base)
+        experiment = stored.get(node)
+        return experiment.patch_text if experiment else ""
+
+    # Load the stored side of the graph first, following each declared ancestor
+    # all the way to its roots: an ancestor's own ancestors contribute patches
+    # too, so a lineage that is only half-loaded would compose a partial state.
+    for entry in artifact.experiments:
+        where = f"experiments.{entry.key}.parent"
+        pending = [ref for ref in entry.declared_parents if ref not in entries]
         seen: set[str] = set()
-        current: str | None = experiment_id
-        while current is not None:
-            if current in seen:
-                result.errors.append(f"{where}: parent chain contains a cycle at {current}.")
-                return None
-            seen.add(current)
-            experiment = get_experiment(conn, current)
-            if experiment is None:
-                result.errors.append(f"{where}: unknown parent experiment {current!r}.")
-                return None
-            if experiment.status not in _BRANCHABLE_STATUSES:
-                result.errors.append(
-                    f"{where}: parent {current} is {experiment.status.value} — only "
-                    "measured experiments (promising/rejected/validated/"
-                    "implementation_ready) can be branched on."
-                )
-                return None
-            texts.append(experiment.patch_text)
-            current = experiment.parent_experiment_id
-        return list(reversed(texts))
-
-    def entry_chain(key: str, visiting: set[str]) -> list[str] | None:
-        """Ancestor patch texts for a same-plan entry key (root first,
-        INCLUDING that entry's own patch — it is an ancestor of its children)."""
-        if key in visiting:
-            result.errors.append(f"experiments.{key}: parent chain contains a cycle.")
-            return None
-        if key in chains:  # memoized: chain up to (excluding) this entry
-            own = _read_entry_patch(entries[key])
-            return [*chains[key], own] if own is not None else None
-        visiting.add(key)
-        entry = entries[key]
-        prefix: list[str] = []
-        if entry.parent is not None:
-            if entry.parent in entries:
-                parent_chain = entry_chain(entry.parent, visiting)
-                if parent_chain is None:
-                    return None
-                prefix = parent_chain
-            else:
-                resolved = db_chain(entry.parent, f"experiments.{key}.parent")
-                if resolved is None:
-                    return None
-                prefix = resolved
-        visiting.discard(key)
-        chains[key] = prefix
-        own = _read_entry_patch(entry)
-        return [*prefix, own] if own is not None else None
-
-    def _read_entry_patch(entry: object) -> str | None:
-        # Patch files are re-validated in Layer 3; here we only need the text
-        # for chain composition, tolerating missing files (Layer 3 reports).
-        from researchforge.experiments.context_export import PlannedExperimentEntry
-
-        assert isinstance(entry, PlannedExperimentEntry)
-        patches_root = (experiments_dir(base) / PATCHES_DIR_NAME).resolve()
-        candidate = (experiments_dir(base) / entry.patch_file).resolve()
-        if not candidate.is_relative_to(patches_root):
-            return None  # Layer 3 reports the containment violation
-        try:
-            return candidate.read_text(encoding="utf-8")
-        except OSError:
-            return None
+        while pending:
+            reference = pending.pop()
+            if reference in stored or reference in seen:
+                continue
+            seen.add(reference)
+            experiment = stored_experiment(reference, where)
+            if experiment is not None:
+                pending.extend(experiment.parent_experiment_ids)
+    if result.errors:
+        return resolution
 
     for entry in artifact.experiments:
-        if entry.parent is None:
-            chains[entry.key] = []
-            parents[entry.key] = None
+        resolution.declared[entry.key] = entry.declared_parents
+        try:
+            ancestors = ancestor_order(entry.key, parents_of)
+        except GraphCycleError as exc:
+            result.errors.append(f"experiments.{entry.key}: parent graph has a cycle ({exc}).")
             continue
-        if entry.parent in entries:
-            parent_chain = entry_chain(entry.parent, set())
-            if parent_chain is not None:
-                chains[entry.key] = parent_chain
-            parents[entry.key] = ""  # same-plan; resolved to an id at persist time
-        else:
-            resolved = db_chain(entry.parent, f"experiments.{entry.key}.parent")
-            if resolved is not None:
-                chains[entry.key] = resolved
-            parents[entry.key] = entry.parent
-    return chains, parents
+        resolution.chains[entry.key] = [
+            text for text in (patch_text_of(node) for node in ancestors) if text
+        ]
+    return resolution
+
+
+def _check_patches(
+    repo_root: Path,
+    baseline_commit: str,
+    artifact: ExperimentPlanArtifact,
+    patch_paths: dict[str, Path],
+    parents: ParentResolution,
+    result: ImportResult,
+) -> dict[str, list[str]]:
+    """Apply every entry in a scratch worktree; return its changed files.
+
+    Each entry that has ancestors is checked on a freshly composed worktree so
+    conflicts between merged branches surface here rather than mid-run.
+    """
+    needs_check = [
+        entry
+        for entry in artifact.experiments
+        if entry.patch_file or parents.chains.get(entry.key)
+    ]
+    if not needs_check:
+        return {}
+
+    manager = WorktreeManager(repo_root)
+    changed_by_key: dict[str, list[str]] = {}
+    try:
+        scratch = manager.create(PLAN_CHECK_WORKTREE, baseline_commit, recreate=True)
+        for entry in needs_check:
+            chain = parents.chains.get(entry.key, [])
+            if chain:
+                scratch = manager.create(PLAN_CHECK_WORKTREE, baseline_commit, recreate=True)
+            chain_files = _apply_chain(manager, scratch, entry.key, chain, result)
+            if chain_files is None:
+                continue
+
+            patch = patch_paths.get(entry.key)
+            if patch is None:
+                changed_by_key[entry.key] = sorted(set(chain_files))
+                continue
+
+            applies, message = manager.apply_patch_check(scratch, patch)
+            if not applies:
+                where = "on top of its ancestor chain" if chain else (
+                    f"at baseline {baseline_commit[:12]}"
+                )
+                result.errors.append(
+                    f"experiments.{entry.key}: patch does not apply {where} — {message}"
+                )
+                continue
+            own_files = manager.patch_numstat(scratch, patch)
+            changed_by_key[entry.key] = sorted(set(chain_files) | set(own_files))
+    except WorktreeError as exc:
+        result.errors.append(f"Could not prepare the patch-check worktree: {exc}")
+    finally:
+        with contextlib.suppress(WorktreeError):
+            manager.remove(PLAN_CHECK_WORKTREE)
+    return changed_by_key
+
+
+def _apply_chain(
+    manager: WorktreeManager,
+    scratch: Path,
+    key: str,
+    chain: list[str],
+    result: ImportResult,
+) -> list[str] | None:
+    """Apply ancestor patches in order; None means the chain does not compose."""
+    chain_files: list[str] = []
+    for depth, ancestor_text in enumerate(chain):
+        ancestor_patch = scratch / f".rf-ancestor-{depth}.patch"
+        ancestor_patch.write_text(ancestor_text, encoding="utf-8")
+        try:
+            chain_files.extend(manager.patch_numstat(scratch, ancestor_patch))
+            manager.apply_patch(scratch, ancestor_patch)
+        except WorktreeError as exc:
+            detail = (
+                f"{MERGE_CONFLICT_PREFIX}: ancestor patch #{depth + 1} of "
+                f"{len(chain)} does not apply on the combined state — {exc}"
+                if len(chain) > 1
+                else f"ancestor patch no longer applies — {exc}"
+            )
+            result.errors.append(f"experiments.{key}: {detail}")
+            return None
+        finally:
+            ancestor_patch.unlink(missing_ok=True)
+    return chain_files
 
 
 def import_experiment_plan(
@@ -239,10 +359,17 @@ def import_experiment_plan(
     except BaselineBlockedError as exc:
         result.errors.append(str(exc))
         return result, None
-    if get_hypothesis(conn, artifact.hypothesis_id) is None:
+    hypothesis = get_hypothesis(conn, artifact.hypothesis_id)
+    if hypothesis is None:
         result.errors.append(
             f"hypothesis_id: unknown hypothesis {artifact.hypothesis_id!r} — "
             "see `researchforge hypotheses list`."
+        )
+        return result, None
+    if not hypothesis.is_plannable:
+        result.errors.append(
+            f"hypothesis_id: {artifact.hypothesis_id} was rejected in review — run "
+            f"`researchforge hypotheses approve {artifact.hypothesis_id}` to plan it."
         )
         return result, None
 
@@ -258,79 +385,46 @@ def import_experiment_plan(
     if result.errors:
         return result, None
 
-    # Layer 2b: resolve `parent:` references (same-plan key or prior exp-NNN)
-    # into ancestor patch chains, refusing cycles and unmeasured parents.
-    chain_texts_by_key, parent_id_by_key = _resolve_parents(conn, artifact, result, base)
+    # Layer 2b: resolve `parent:` / `parents:` references (same-plan keys or
+    # stored exp-NNN ids) into ordered ancestor patch chains, refusing cycles
+    # and unmeasured parents.
+    parents = _resolve_parents(conn, artifact, result, base)
     if result.errors:
         return result, None
 
-    # Layer 3: patch files.
+    # Layer 3: patch files (skipped for env-only entries and pure merges).
     patch_paths: dict[str, Path] = {}
     for entry in artifact.experiments:
-        candidate = _load_patch(entry.key, entry.patch_file, base, result.errors)
-        if candidate is not None:
-            patch_paths[entry.key] = candidate
+        has_patch = bool(entry.patch_file)
+        has_env = bool(entry.env_overrides)
+        is_merge = len(parents.declared.get(entry.key, [])) > 1
+        if has_patch and has_env:
+            result.errors.append(
+                f"experiments.{entry.key}: set either patch_file OR env_overrides, not both."
+            )
+            continue
+        if not has_patch and not has_env and not is_merge:
+            result.errors.append(
+                f"experiments.{entry.key}: must provide either patch_file or env_overrides "
+                "(only a merge of several parents may have neither)."
+            )
+            continue
+        if has_patch:
+            candidate = _load_patch(entry.key, entry.patch_file, base, result.errors)  # type: ignore[arg-type]
+            if candidate is not None:
+                patch_paths[entry.key] = candidate
+        # env-only: no patch file to load
     if result.errors:
         return result, None
 
     # Layer 4: apply-check + changed-path extraction in a scratch worktree.
-    # Entries with a parent get a fresh worktree with the ancestor chain
-    # actually applied, so the child's diff is checked against the state it
-    # was written for; changed files are the union of the whole chain.
-    manager = WorktreeManager(repo_root)
-    changed_by_key: dict[str, list[str]] = {}
-    try:
-        scratch = manager.create(PLAN_CHECK_WORKTREE, baseline.commit_sha, recreate=True)
-        for entry in artifact.experiments:
-            patch = patch_paths[entry.key]
-            chain = chain_texts_by_key.get(entry.key, [])
-            if chain:
-                scratch = manager.create(PLAN_CHECK_WORKTREE, baseline.commit_sha, recreate=True)
-                chain_files: list[str] = []
-                chain_ok = True
-                for depth, ancestor_text in enumerate(chain):
-                    ancestor_patch = scratch / f".rf-ancestor-{depth}.patch"
-                    ancestor_patch.write_text(ancestor_text, encoding="utf-8")
-                    chain_files.extend(manager.patch_numstat(scratch, ancestor_patch))
-                    try:
-                        manager.apply_patch(scratch, ancestor_patch)
-                    except WorktreeError as exc:
-                        result.errors.append(
-                            f"experiments.{entry.key}: ancestor patch #{depth + 1} in the "
-                            f"parent chain no longer applies — {exc}"
-                        )
-                        chain_ok = False
-                        break
-                    finally:
-                        ancestor_patch.unlink(missing_ok=True)
-                if not chain_ok:
-                    continue
-                applies, message = manager.apply_patch_check(scratch, patch)
-                if not applies:
-                    result.errors.append(
-                        f"experiments.{entry.key}: patch does not apply on top of its "
-                        f"parent chain — {message}"
-                    )
-                    continue
-                own_files = manager.patch_numstat(scratch, patch)
-                changed_by_key[entry.key] = sorted(set(chain_files) | set(own_files))
-                # Leave a clean baseline worktree for subsequent parentless entries.
-                scratch = manager.create(PLAN_CHECK_WORKTREE, baseline.commit_sha, recreate=True)
-                continue
-            applies, message = manager.apply_patch_check(scratch, patch)
-            if not applies:
-                result.errors.append(
-                    f"experiments.{entry.key}: patch does not apply at baseline "
-                    f"{baseline.commit_sha[:12]} — {message}"
-                )
-                continue
-            changed_by_key[entry.key] = manager.patch_numstat(scratch, patch)
-    except WorktreeError as exc:
-        result.errors.append(f"Could not prepare the patch-check worktree: {exc}")
-        return result, None
-    finally:
-        with contextlib.suppress(WorktreeError):
-            manager.remove(PLAN_CHECK_WORKTREE)
+    # An entry with ancestors is checked in a worktree where the whole ancestor
+    # chain has actually been applied, so the diff is verified against the state
+    # it was written for and a merge that cannot compose is caught before
+    # anything runs. Entries with neither a patch nor ancestors change no files.
+    changed_by_key = _check_patches(
+        repo_root, baseline.commit_sha, artifact, patch_paths, parents, result
+    )
     if result.errors:
         return result, None
 
@@ -346,51 +440,65 @@ def import_experiment_plan(
         for entry, experiment_id in zip(artifact.experiments, experiment_ids, strict=True)
     }
     for entry, experiment_id in zip(artifact.experiments, experiment_ids, strict=True):
-        patch_text = patch_paths[entry.key].read_text(encoding="utf-8")
-        digest = hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
-        if digest in seen_hashes:
-            result.warnings.append(
-                f"experiments.{entry.key}: patch is identical to "
-                f"{seen_hashes[digest]} — duplicate variant?"
-            )
-        seen_hashes.setdefault(digest, entry.key)
-
-        changed = changed_by_key[entry.key]
-        guard = check_changed_paths(changed, contract.spec.permissions)
-        status = ExperimentStatus.PLANNED
-        decision = None
-        if not guard.allowed:
-            status = ExperimentStatus.REJECTED
-            details = ", ".join(
-                f"{violation.path} ({violation.rule.value})" for violation in guard.violations
-            )
-            decision = Decision(
-                outcome=DecisionOutcome.REJECT,
-                reason=f"changes protected or non-editable paths: {details}",
-            )
-            result.warnings.append(
-                f"experiments.{entry.key} ({experiment_id}): {decision.reason} — "
-                "recorded as rejected; it will not run."
-            )
-        else:
+        # No own patch: an env-override variant, or a merge whose whole change
+        # is its ancestors' patches. Neither adds file changes of its own, so
+        # the path guard has nothing new to judge — the ancestors were guarded
+        # when they were imported.
+        is_patchless = not entry.patch_file
+        if is_patchless:
+            patch_text = ""
+            digest = hashlib.sha256(b"").hexdigest()
+            changed = changed_by_key.get(entry.key, [])
+            status = ExperimentStatus.PLANNED
+            decision = None
             runnable += 1
+        else:
+            patch_text = patch_paths[entry.key].read_text(encoding="utf-8")
+            digest = hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
+            if digest in seen_hashes:
+                result.warnings.append(
+                    f"experiments.{entry.key}: patch is identical to "
+                    f"{seen_hashes[digest]} — duplicate variant?"
+                )
+            seen_hashes.setdefault(digest, entry.key)
 
-        parent_ref = parent_id_by_key.get(entry.key)
-        if parent_ref == "":  # same-plan key -> the id assigned in this import
-            assert entry.parent is not None
-            parent_ref = id_by_key[entry.parent]
+            changed = changed_by_key.get(entry.key, [])
+            guard = check_changed_paths(changed, contract.spec.permissions)
+            status = ExperimentStatus.PLANNED
+            decision = None
+            if not guard.allowed:
+                status = ExperimentStatus.REJECTED
+                details = ", ".join(
+                    f"{violation.path} ({violation.rule.value})" for violation in guard.violations
+                )
+                decision = Decision(
+                    outcome=DecisionOutcome.REJECT,
+                    reason=f"changes protected or non-editable paths: {details}",
+                )
+                result.warnings.append(
+                    f"experiments.{entry.key} ({experiment_id}): {decision.reason} — "
+                    "recorded as rejected; it will not run."
+                )
+            else:
+                runnable += 1
+
         experiments.append(
             Experiment(
                 experiment_id=experiment_id,
                 plan_id=plan_id,
                 hypothesis_id=artifact.hypothesis_id,
-                parent_experiment_id=parent_ref,
+                parent_experiment_ids=[
+                    id_by_key.get(reference, reference)
+                    for reference in parents.declared.get(entry.key, [])
+                ],
+                patch_includes_parents=entry.patch_includes_parents,
                 title=entry.title,
                 change_summary=entry.change_summary,
                 patch_text=patch_text,
                 patch_sha256=digest,
                 changed_files=changed,
-                path_violations=guard.violations,
+                env_overrides=dict(entry.env_overrides or {}),
+                path_violations=guard.violations if not is_patchless else [],
                 expected_effect=entry.expected_effect,
                 status=status,
                 decision=decision,

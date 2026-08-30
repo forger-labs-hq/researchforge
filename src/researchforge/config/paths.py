@@ -16,6 +16,8 @@ DB_FILENAME = "researchforge.db"
 CONFIG_FILENAME = "config.json"
 SYNTHESIS_DIR_NAME = "synthesis"
 REPORTS_DIR_NAME = "reports"
+AUTORUN_STATE_FILENAME = "autorun.json"
+RESEARCH_LOG_FILENAME = "research-log.md"
 
 
 def researchforge_dir(base: Path | None = None) -> Path:
@@ -83,3 +85,13 @@ def experiments_dir(base: Path | None = None) -> Path:
 def experiment_artifacts_dir(base: Path | None = None) -> Path:
     """Directory holding experiment run artifacts (created lazily)."""
     return artifacts_dir(base) / "experiments"
+
+
+def autorun_state_path(base: Path | None = None) -> Path:
+    """Loop state for `researchforge autorun --resume`."""
+    return researchforge_dir(base) / AUTORUN_STATE_FILENAME
+
+
+def research_log_path(base: Path | None = None) -> Path:
+    """The living research-log document read before every re-synthesis."""
+    return researchforge_dir(base) / RESEARCH_LOG_FILENAME

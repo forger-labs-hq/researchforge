@@ -68,32 +68,65 @@ class GhClient:
     def default_remote_exists(self, cwd: Path) -> bool:
         return self._runner.run(["git", "remote", "get-url", "origin"], cwd=cwd).ok
 
-    def push_branch(self, cwd: Path, branch: str, remote: str = "origin") -> None:
-        """Push exactly this one branch ref — never --force, never anything else."""
+    def list_remotes(self, cwd: Path) -> list[tuple[str, str]]:
+        """Configured `(name, push url)` pairs, in git's order."""
+        result = self._runner.run(["git", "remote", "--verbose"], cwd=cwd)
+        if not result.ok:
+            raise GhError(f"could not list git remotes: {result.stderr.strip()}")
+        remotes: list[tuple[str, str]] = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == "(push)":
+                remotes.append((parts[0], parts[1]))
+        return remotes
+
+    def push_commit(self, cwd: Path, commit: str, branch: str, destination: str) -> None:
+        """Push one commit to `branch` on a remote name or URL, fast-forward only."""
         result = self._runner.run(
-            ["git", "push", "--set-upstream", remote, f"refs/heads/{branch}"],
+            ["git", "push", destination, f"{commit}:refs/heads/{branch}"],
             cwd=cwd,
             timeout_seconds=300.0,
         )
         if not result.ok:
             raise GhError(f"git push failed: {result.stderr.strip() or result.stdout.strip()}")
 
-    def viewer_can_push(self, cwd: Path) -> bool:
-        """Whether the authenticated gh user has write access to origin's repo."""
+    def viewer_can_push(self, cwd: Path, repo: str) -> bool:
+        """Whether the authenticated gh user has write access to `repo`."""
         result = self._runner.run(
-            ["gh", "repo", "view", "--json", "viewerPermission", "-q", ".viewerPermission"],
+            [
+                "gh",
+                "repo",
+                "view",
+                repo,
+                "--json",
+                "viewerPermission",
+                "-q",
+                ".viewerPermission",
+            ],
             cwd=cwd,
         )
         return result.ok and result.stdout.strip() in ("WRITE", "MAINTAIN", "ADMIN")
 
-    def repo_nwo(self, cwd: Path) -> str:
-        """origin's repository as owner/name (the upstream PR target)."""
+    def default_branch(self, cwd: Path, repo: str) -> str:
+        """`repo`'s default branch — the base a pull request targets."""
         result = self._runner.run(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            [
+                "gh",
+                "repo",
+                "view",
+                repo,
+                "--json",
+                "defaultBranchRef",
+                "-q",
+                ".defaultBranchRef.name",
+            ],
             cwd=cwd,
         )
         if not result.ok or not result.stdout.strip():
-            raise GhError(f"could not resolve the origin repository: {result.stderr.strip()}")
+            raise GhError(
+                f"could not resolve the default branch of {repo}: "
+                f"{result.stderr.strip() or 'no branch reported'}"
+            )
         return result.stdout.strip()
 
     def viewer_login(self, cwd: Path) -> str:
@@ -103,32 +136,21 @@ class GhClient:
             raise GhError(f"could not resolve the gh account: {result.stderr.strip()}")
         return result.stdout.strip()
 
-    def fork_and_add_remote(self, cwd: Path, remote: str = "fork") -> None:
-        """Create (or reuse) a fork of origin's repo and add it as `remote`."""
+    def fork_and_add_remote(self, cwd: Path, repo: str, remote: str = "fork") -> None:
+        """Create (or reuse) a fork of `repo` and add it as `remote`."""
         if self._runner.run(["git", "remote", "get-url", remote], cwd=cwd).ok:
             return  # remote already wired (e.g. a previous ship pr)
         result = self._runner.run(
-            ["gh", "repo", "fork", "--remote", "--remote-name", remote],
+            ["gh", "repo", "fork", repo, "--remote", "--remote-name", remote],
             cwd=cwd,
             timeout_seconds=120.0,
         )
         if not result.ok:
             raise GhError(f"gh repo fork failed: {result.stderr.strip() or result.stdout.strip()}")
 
-    def commits_ahead_of_default(
-        self, cwd: Path, branch: str, remote: str = "origin"
-    ) -> int | None:
-        """Commits on `branch` that are not on the remote default branch (None: unknown)."""
-        head = self._runner.run(
-            ["gh", "repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"],
-            cwd=cwd,
-        )
-        if not head.ok or not head.stdout.strip():
-            return None
-        default = head.stdout.strip()
-        count = self._runner.run(
-            ["git", "rev-list", "--count", f"{remote}/{default}..{branch}"], cwd=cwd
-        )
+    def commits_ahead(self, cwd: Path, branch: str, base_ref: str) -> int | None:
+        """Commits on `branch` that are not on `base_ref` (None when unknown)."""
+        count = self._runner.run(["git", "rev-list", "--count", f"{base_ref}..{branch}"], cwd=cwd)
         if not count.ok:
             return None
         try:

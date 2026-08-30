@@ -54,8 +54,15 @@ def summarize_validation(
     attempts: list[ExperimentExecution],
     baseline: BaselineRun,
     direction: MetricDirection,
+    stdev_max: float | None = None,
 ) -> ValidationSummary:
-    """Aggregate validation attempts into a summary and final outcome."""
+    """Aggregate validation attempts into a summary and final outcome.
+
+    `stdev_max` refuses to validate a result whose repeats disagree by more than
+    that much, however well it improved on average. A wide spread means the
+    benchmark cannot resolve the change being claimed, so the average sits
+    inside the noise and improving on the baseline was partly the draw.
+    """
     assert baseline.metrics is not None
     base_value = baseline.metrics.primary_metric.value
 
@@ -77,7 +84,11 @@ def summarize_validation(
         and all(_improved(base_value, value, direction) for value in values)
     )
 
-    if all_succeeded and all_constraints and improvement_in_all:
+    too_noisy = stdev_max is not None and stdev is not None and stdev > stdev_max
+
+    if too_noisy:
+        outcome = ExperimentStatus.REJECTED
+    elif all_succeeded and all_constraints and improvement_in_all:
         outcome = ExperimentStatus.VALIDATED
     elif any_violation or not all_succeeded:
         outcome = ExperimentStatus.REJECTED
@@ -96,6 +107,7 @@ def summarize_validation(
         max_value=max(values) if values else None,
         all_constraints_passed=all_constraints,
         improvement_confirmed_in_all=improvement_in_all,
+        stdev_max=stdev_max,
         outcome=outcome,
     )
 
@@ -113,8 +125,15 @@ def validate_run(
     experiment_ids: list[str] | None = None,
     runner: CommandRunner | None = None,
     docker: DockerProbe | None = None,
+    repeats: int | None = None,
+    stdev_max: float | None = None,
 ) -> ValidationRun:
-    """Run Stage 3 for the run's promising experiments (or a subset)."""
+    """Run Stage 3 for the run's promising experiments (or a subset).
+
+    `repeats` overrides the contract's `validation.repeat_finalists` for this
+    invocation only; the contract is not modified, so what the project committed
+    to stays the record and this stays a choice about one validation.
+    """
     run = get_run(conn, run_id)
     if run is None:
         raise ExperimentBlockedError(f"Unknown run: {run_id}.")
@@ -145,7 +164,7 @@ def validate_run(
             f"`researchforge results show {run_id}`."
         )
 
-    repeats = prep.contract.spec.validation.repeat_finalists
+    attempts_each = repeats or prep.contract.spec.validation.repeat_finalists
     direction = prep.contract.spec.objective.primary_metric.direction
     summaries: list[ValidationSummary] = []
 
@@ -161,7 +180,7 @@ def validate_run(
         start_attempt = max((e.attempt for e in previous_validation_attempts), default=0) + 1
 
         attempts: list[ExperimentExecution] = []
-        for offset in range(repeats):
+        for offset in range(attempts_each):
             attempt = start_attempt + offset
             execution = execute_stage(
                 conn,
@@ -175,7 +194,9 @@ def validate_run(
             )
             attempts.append(execution)
 
-        summary = summarize_validation(experiment, attempts, prep.baseline, direction)
+        summary = summarize_validation(
+            experiment, attempts, prep.baseline, direction, stdev_max
+        )
         decision_reason = (
             f"validation: {summary.succeeded_attempts}/{summary.attempts} attempts "
             f"succeeded; values={summary.values}; mean={summary.mean}; "
@@ -185,6 +206,14 @@ def validate_run(
             decision = Decision(
                 outcome=DecisionOutcome.KEEP,
                 reason=f"validated across {summary.attempts} repeated runs — {decision_reason}",
+            )
+        elif summary.stdev_exceeded:
+            decision = Decision(
+                outcome=DecisionOutcome.REJECT,
+                reason=(
+                    f"spread too wide to validate: stdev {summary.stdev:.4g} exceeds the "
+                    f"{stdev_max:.4g} limit — {decision_reason}"
+                ),
             )
         elif summary.outcome is ExperimentStatus.REJECTED:
             decision = Decision(

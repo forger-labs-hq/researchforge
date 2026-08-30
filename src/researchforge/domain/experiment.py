@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from researchforge.domain.baseline import EnvironmentFingerprint
 from researchforge.domain.contract import ConstraintOperator
@@ -153,22 +153,75 @@ class ExperimentPlan(BaseModel):
     updated_at: datetime
 
 
+def _lift_legacy_parent(values: object) -> object:
+    """Read pre-DAG records, which stored a single `parent_experiment_id`.
+
+    Experiments are persisted as JSON documents, so the migration lives here
+    rather than in SQL: a record written before multi-parent support arrives
+    with the singular key and no list, and is lifted into a one-item list.
+    """
+    if not isinstance(values, dict):
+        return values
+    if values.get("parent_experiment_ids") is not None:
+        return values
+    legacy = values.get("parent_experiment_id")
+    return {**values, "parent_experiment_ids": [legacy] if legacy else []}
+
+
 class Experiment(BaseModel):
     experiment_id: str = Field(pattern=r"^exp-\d{3}$")
     plan_id: str
     hypothesis_id: str
-    parent_experiment_id: str | None = None
+    parent_experiment_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Measured ancestors this experiment builds on, in the order the "
+            "author declared them. More than one means it merges branches."
+        ),
+    )
+    patch_includes_parents: bool = Field(
+        default=False,
+        description=(
+            "Whether patch_text already contains every parent's change. Set when "
+            "the branches could not be composed mechanically and the combination "
+            "was re-authored as one self-contained diff; the parents then remain "
+            "as lineage only and their patches are not applied again."
+        ),
+    )
     title: str
     change_summary: str
-    patch_text: str  # the exact change, immutable (spec §4.5)
+    patch_text: str  # the exact change, immutable (spec §4.5); "" for env-only experiments
     patch_sha256: str
     changed_files: list[str] = Field(default_factory=list)  # CLI-extracted, never authored
+    env_overrides: dict[str, str] = Field(default_factory=dict)  # injected at run time
     path_violations: list[PathViolation] = Field(default_factory=list)
     expected_effect: ExpectedImpact | None = None
+    observation: str | None = Field(
+        default=None,
+        description=(
+            "What the run's own output showed, read back from the benchmark logs "
+            "after it finished. Never a claim about the metric — the measurement "
+            "is recorded separately and is what decides anything."
+        ),
+    )
     status: ExperimentStatus = ExperimentStatus.PLANNED
     decision: Decision | None = None
     created_at: datetime
     updated_at: datetime
+
+    _lift_parent = model_validator(mode="before")(staticmethod(_lift_legacy_parent))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def parent_experiment_id(self) -> str | None:
+        """The first declared parent — the single-lineage view of this node."""
+        return self.parent_experiment_ids[0] if self.parent_experiment_ids else None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_merge(self) -> bool:
+        """Whether this experiment combines more than one branch."""
+        return len(self.parent_experiment_ids) > 1
 
 
 class RunStatus(StrEnum):
@@ -220,7 +273,7 @@ class ExperimentExecution(BaseModel):
     run_id: str
     hypothesis_id: str
     baseline_commit: str
-    parent_experiment_id: str | None = None
+    parent_experiment_ids: list[str] = Field(default_factory=list)
     execution_mode: ExecutionEngine
     benchmark_stage: BenchmarkStage
     attempt: int = Field(ge=1)
@@ -239,6 +292,13 @@ class ExperimentExecution(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
 
+    _lift_parent = model_validator(mode="before")(staticmethod(_lift_legacy_parent))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def parent_experiment_id(self) -> str | None:
+        return self.parent_experiment_ids[0] if self.parent_experiment_ids else None
+
 
 class ValidationSummary(BaseModel):
     experiment_id: str
@@ -252,4 +312,16 @@ class ValidationSummary(BaseModel):
     max_value: float | None = None
     all_constraints_passed: bool = False
     improvement_confirmed_in_all: bool = False
+    stdev_max: float | None = None
+    """The spread limit this validation was held to, when one was set."""
+
     outcome: ExperimentStatus
+
+    @property
+    def stdev_exceeded(self) -> bool:
+        """Whether the measured spread broke the limit the run was held to."""
+        return (
+            self.stdev_max is not None
+            and self.stdev is not None
+            and self.stdev > self.stdev_max
+        )

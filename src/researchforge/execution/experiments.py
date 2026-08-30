@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import platform as platform_module
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,6 +55,8 @@ from researchforge.execution.metrics import MetricResult
 from researchforge.execution.path_guard import check_changed_paths
 from researchforge.execution.runner import CommandRunner, SubprocessRunner
 from researchforge.execution.worktrees import WorktreeError, WorktreeManager
+from researchforge.experiments.graph import ancestor_order
+from researchforge.experiments.measurements import latest_full_execution
 from researchforge.storage.baseline_repository import insert_baseline_run
 from researchforge.storage.contract_repository import get_active_contract
 from researchforge.storage.experiment_repository import (
@@ -66,6 +69,7 @@ from researchforge.storage.experiment_repository import (
     list_executions,
     list_experiments,
     next_run_id,
+    patch_ancestry,
     update_execution,
     update_experiment,
     update_plan_status,
@@ -73,6 +77,21 @@ from researchforge.storage.experiment_repository import (
 )
 from researchforge.storage.project_repository import get_project
 from researchforge.storage.scan_repository import get_latest_scan
+
+PhaseFn = Callable[[str], None]
+"""Where a stage announces what it is doing, for a caller that shows progress."""
+
+
+def _phase(sink: PhaseFn | None, message: str) -> None:
+    if sink is not None:
+        sink(message)
+
+
+def _prefixed(sink: PhaseFn | None, label: str) -> PhaseFn | None:
+    """The same sink, with every message announcing which experiment it is."""
+    if sink is None:
+        return None
+    return lambda message: sink(f"{label} · {message}")
 
 
 class ExperimentBlockedError(Exception):
@@ -383,6 +402,7 @@ def execute_stage(
     runner: CommandRunner,
     *,
     extra_env: dict[str, str] | None = None,
+    on_phase: PhaseFn | None = None,
 ) -> ExperimentExecution:
     """Run one stage attempt in a fresh worktree; persists the execution row
     (inserted as `running` first so interruptions are detectable)."""
@@ -410,7 +430,7 @@ def execute_stage(
         run_id=run.run_id,
         hypothesis_id=experiment.hypothesis_id,
         baseline_commit=prep.plan.baseline_commit,
-        parent_experiment_id=experiment.parent_experiment_id,
+        parent_experiment_ids=list(experiment.parent_experiment_ids),
         execution_mode=prep.resolution.execution_mode,
         benchmark_stage=stage,
         attempt=attempt,
@@ -434,26 +454,36 @@ def execute_stage(
     )
     insert_execution(conn, prep.project.id, execution)
 
-    # Ancestor chain (root first) for branched experiments: applied before
-    # the experiment's own patch so the child runs on the composed state.
+    # Ancestor patches in dependency order, applied before the experiment's own
+    # patch so it runs on the state it was written against. A merge has several
+    # parents, so the order comes from a topological walk rather than a linear
+    # one, and each ancestor contributes at most once however many paths reach
+    # it. Import already proved this composes and the lineage is acyclic. A
+    # re-authored merge contributes no chain at all: its own patch is already
+    # the combined state.
     ancestor_patches: list[Path] = []
-    ancestor: str | None = experiment.parent_experiment_id
-    ancestor_texts: list[str] = []
-    while ancestor is not None:
-        parent_experiment = get_experiment(conn, ancestor)
-        assert parent_experiment is not None  # import validated the chain
-        ancestor_texts.append(parent_experiment.patch_text)
-        ancestor = parent_experiment.parent_experiment_id
-    for depth, text in enumerate(reversed(ancestor_texts)):
+    for depth, ancestor_id in enumerate(
+        ancestor_order(experiment.experiment_id, patch_ancestry(conn))
+    ):
+        ancestor_experiment = get_experiment(conn, ancestor_id)
+        assert ancestor_experiment is not None  # import validated the lineage
+        if not ancestor_experiment.patch_text:
+            continue
         chain_path = run_artifacts / f"chain-{depth}.patch"
-        chain_path.write_text(text, encoding="utf-8")
+        chain_path.write_text(ancestor_experiment.patch_text, encoding="utf-8")
         ancestor_patches.append(chain_path)
 
     manager = WorktreeManager(prep.repo_root)
     secrets = venv_exec.forwarded_values(spec.secrets.forward_environment_variables)
     try:
+        _phase(on_phase, "Checking out an isolated worktree at the baseline commit…")
         worktree = manager.create(worktree_name, prep.plan.baseline_commit, recreate=True)
+        # An env-override variant and a pure merge both have an empty patch_text:
+        # the first changes no files at all, the second is exactly its ancestors.
+        has_own_patch = bool(experiment.patch_text)
         try:
+            if has_own_patch or ancestor_patches:
+                _phase(on_phase, "Applying the experiment's patch…")
             for depth, chain_path in enumerate(ancestor_patches):
                 try:
                     manager.apply_patch(worktree, chain_path)
@@ -461,7 +491,8 @@ def execute_stage(
                     raise WorktreeError(
                         f"ancestor patch #{depth + 1} ({chain_path.name}) failed: {exc}"
                     ) from exc
-            manager.apply_patch(worktree, diff_path)
+            if has_own_patch:
+                manager.apply_patch(worktree, diff_path)
         except WorktreeError as exc:
             execution = execution.model_copy(
                 update={
@@ -473,24 +504,33 @@ def execute_stage(
             update_execution(conn, execution)
             return execution
 
-        # Defense in depth: re-check what actually changed, and refuse symlinks.
-        changed_now = manager.changed_paths(worktree)
-        guard = check_changed_paths(changed_now, spec.permissions)
-        symlinks = [path for path in changed_now if (worktree / path).is_symlink()]
-        if not guard.allowed or symlinks:
-            details = ", ".join(
-                [f"{v.path} ({v.rule.value})" for v in guard.violations]
-                + [f"{s} (symlink)" for s in symlinks]
-            )
-            execution = execution.model_copy(
-                update={
-                    "status": ExecutionRecordStatus.REJECTED_PATHS,
-                    "failure_reason": f"applied patch touches disallowed paths: {details}",
-                    "completed_at": datetime.now(UTC),
-                }
-            )
-            update_execution(conn, execution)
-            return execution
+        # Defense in depth: re-check what actually landed in the worktree, and
+        # refuse symlinks. Ancestor patches count — a merge's whole change is
+        # its ancestors', so it must be guarded like any other file change.
+        if has_own_patch or ancestor_patches:
+            changed_now = manager.changed_paths(worktree)
+            guard = check_changed_paths(changed_now, spec.permissions)
+            symlinks = [path for path in changed_now if (worktree / path).is_symlink()]
+            if not guard.allowed or symlinks:
+                details = ", ".join(
+                    [f"{v.path} ({v.rule.value})" for v in guard.violations]
+                    + [f"{s} (symlink)" for s in symlinks]
+                )
+                execution = execution.model_copy(
+                    update={
+                        "status": ExecutionRecordStatus.REJECTED_PATHS,
+                        "failure_reason": f"applied patch touches disallowed paths: {details}",
+                        "completed_at": datetime.now(UTC),
+                    }
+                )
+                update_execution(conn, execution)
+                return execution
+
+        # Merge experiment-level env overrides (env_overrides > extra_env > secrets).
+        combined_env: dict[str, str] | None = {
+            **(extra_env or {}),
+            **experiment.env_overrides,
+        } or None
 
         outcome = run_evaluation(
             spec=spec,
@@ -504,7 +544,8 @@ def execute_stage(
             fingerprint=execution.fingerprint,
             name_slug=f"{experiment.experiment_id}-{stage.value}-a{attempt}",
             test_command=spec.execution.test_command,
-            extra_env=extra_env,
+            extra_env=combined_env,
+            on_phase=on_phase,
         )
         constraint_results = (
             evaluate_constraints(outcome.metrics, spec.objective.hard_constraints, stage=stage)
@@ -564,16 +605,29 @@ def _run_one_experiment(
     runner: CommandRunner,
     *,
     attempt: int = 1,
+    on_phase: PhaseFn | None = None,
 ) -> Experiment:
     """Screening (if configured) then full benchmark for one experiment."""
     spec = prep.contract.spec
     direction = spec.objective.primary_metric.direction
     experiment = _set_experiment(conn, experiment, ExperimentStatus.PREPARING)
 
+    def staged(stage: str) -> PhaseFn | None:
+        if on_phase is None:
+            return None
+        return lambda message: on_phase(f"{stage}: {message}")
+
     if spec.execution.screening_command is not None:
         experiment = _set_experiment(conn, experiment, ExperimentStatus.RUNNING)
         screening = execute_stage(
-            conn, prep, run, experiment, BenchmarkStage.SCREENING, attempt, runner
+            conn,
+            prep,
+            run,
+            experiment,
+            BenchmarkStage.SCREENING,
+            attempt,
+            runner,
+            on_phase=staged("screening"),
         )
         if screening.status is ExecutionRecordStatus.REJECTED_PATHS:
             return _set_experiment(
@@ -630,7 +684,16 @@ def _run_one_experiment(
     else:
         experiment = _set_experiment(conn, experiment, ExperimentStatus.RUNNING)
 
-    full = execute_stage(conn, prep, run, experiment, BenchmarkStage.FULL, attempt, runner)
+    full = execute_stage(
+        conn,
+        prep,
+        run,
+        experiment,
+        BenchmarkStage.FULL,
+        attempt,
+        runner,
+        on_phase=staged("benchmark"),
+    )
     if full.status is ExecutionRecordStatus.REJECTED_PATHS:
         return _set_experiment(
             conn,
@@ -736,8 +799,20 @@ def execute_run(
     run: ExperimentRunGroup,
     *,
     runner: CommandRunner | None = None,
+    stall_override: int | None = None,
+    on_phase: PhaseFn | None = None,
+    on_result: PhaseFn | None = None,
 ) -> RunSummary:
-    """One experiment at a time; a failure never aborts the run."""
+    """One experiment at a time; a failure never aborts the run.
+
+    Stops early when `stall` consecutive non-improvements are recorded.
+    `stall` comes from the contract (``execution.stall``) but can be
+    overridden at runtime via ``stall_override``.
+
+    `on_phase` hears what is happening right now and `on_result` hears each
+    experiment's verdict. They are separate because one is worth overwriting
+    and the other is worth keeping.
+    """
     active_runner: CommandRunner = runner or SubprocessRunner()
     screening_baseline: BaselineRun | None = None
     if run.screening_baseline_id is not None:
@@ -745,17 +820,83 @@ def execute_run(
 
         screening_baseline = get_latest_baseline(conn, command_kind="screening")
 
+    # Stall configuration: CLI override wins; fall back to contract; None = no stall.
+    stall: int | None = (
+        stall_override
+        if stall_override is not None
+        else prep.contract.spec.execution.stall
+    )
+    consecutive_non_improvements = 0
+
     if run.status is RunStatus.IN_PROGRESS:
-        for experiment in list_experiments(conn, run.plan_id):
-            if experiment.status is not ExperimentStatus.APPROVED:
+        all_approved = [e for e in list_experiments(conn, run.plan_id)
+                        if e.status is ExperimentStatus.APPROVED]
+        for position, experiment in enumerate(all_approved, start=1):
+            # Stall check BEFORE running each experiment
+            if stall is not None and consecutive_non_improvements >= stall:
+                # Cancel remaining approved experiments
+                update_experiment(
+                    conn,
+                    experiment.model_copy(
+                        update={"status": advance(experiment.status, ExperimentStatus.CANCELLED)}
+                    ),
+                )
                 continue
-            _run_one_experiment(conn, prep, run, experiment, screening_baseline, active_runner)
+
+            counted = f"{experiment.experiment_id} ({position}/{len(all_approved)})"
+            _phase(on_phase, f"{counted} {experiment.title}")
+            result = _run_one_experiment(
+                conn,
+                prep,
+                run,
+                experiment,
+                screening_baseline,
+                active_runner,
+                on_phase=_prefixed(on_phase, counted),
+            )
+            _phase(on_result, _verdict(conn, result, prep))
+            if result.status is ExperimentStatus.PROMISING:
+                consecutive_non_improvements = 0
+            else:
+                consecutive_non_improvements += 1
+
         run = run.model_copy(
             update={"status": RunStatus.COMPLETED, "completed_at": datetime.now(UTC)}
         )
         update_run(conn, run)
         update_plan_status(conn, run.plan_id, PlanStatus.COMPLETED)
     return _summarize(conn, run, prep)
+
+
+_VERDICT_MARK = {
+    ExperimentStatus.PROMISING: "✓",
+    ExperimentStatus.VALIDATED: "✓",
+    ExperimentStatus.IMPLEMENTATION_READY: "✓",
+    ExperimentStatus.REJECTED: "·",
+    ExperimentStatus.CANCELLED: "·",
+}
+
+
+def _verdict(conn: sqlite3.Connection, experiment: Experiment, prep: RunPreparation) -> str:
+    """One line per finished experiment: what it measured, or why it did not."""
+    mark = _VERDICT_MARK.get(experiment.status, "✗")
+    metric = prep.contract.spec.objective.primary_metric.name
+    execution = latest_full_execution(
+        list_executions(conn, experiment_id=experiment.experiment_id), experiment.experiment_id
+    )
+    if execution is not None and execution.metrics is not None:
+        value = execution.metrics.primary_metric.value
+        reference = prep.baseline.metrics
+        delta = (
+            f" ({value - reference.primary_metric.value:+.4f} vs baseline)"
+            if reference is not None
+            else ""
+        )
+        return f"  {mark} {experiment.experiment_id} {metric} = {value:.4f}{delta}"
+
+    reason = experiment.decision.reason if experiment.decision else ""
+    detail = f" — {reason}" if reason else ""
+    return f"  {mark} {experiment.experiment_id} {experiment.status.value}{detail}"
 
 
 def resume_run(

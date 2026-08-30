@@ -23,6 +23,7 @@ from researchforge.domain.experiment import (
     ExperimentStatus,
     ValidationSummary,
 )
+from researchforge.experiments.measurements import latest_full_execution
 
 VIABLE_STATUSES = frozenset(
     {
@@ -152,17 +153,6 @@ def pareto_frontier(
     return frontier
 
 
-def _latest_full_execution(
-    executions: list[ExperimentExecution], experiment_id: str
-) -> ExperimentExecution | None:
-    candidates = [
-        e
-        for e in executions
-        if e.experiment_id == experiment_id and e.benchmark_stage is BenchmarkStage.FULL
-    ]
-    return candidates[-1] if candidates else None
-
-
 def _candidate_row(
     experiment: Experiment,
     executions: list[ExperimentExecution],
@@ -174,7 +164,7 @@ def _candidate_row(
     assert baseline.metrics is not None
     base_value = baseline.metrics.primary_metric.value
 
-    full = _latest_full_execution(executions, experiment.experiment_id)
+    full = latest_full_execution(executions, experiment.experiment_id)
     metrics = full.metrics if full is not None else None
     primary_value = metrics.primary_metric.value if metrics is not None else None
     return CandidateRow(

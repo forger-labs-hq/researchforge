@@ -33,17 +33,17 @@ from researchforge.execution.ranking import (
 from researchforge.execution.validation import summarize_validation
 from researchforge.reporting.svg_charts import (
     Bar,
+    GraphNode,
     Point,
     ProgressPoint,
     SpreadRow,
-    TreeNode,
     bar_chart,
     funnel_chart,
+    graph_chart,
     progress_chart,
     scatter_chart,
     spread_chart,
     status_color,
-    tree_chart,
 )
 
 DASHBOARD_CSS = """
@@ -384,18 +384,23 @@ def build_dashboard(
     )
     sections.append(f"<div class='cards'>{stat_cards}</div>")
 
-    nodes = tree_nodes(all_experiments, all_executions, ranking)
+    nodes = graph_nodes(all_experiments, all_executions, ranking)
     if nodes:
-        chart = tree_chart(
+        chart = graph_chart(
             nodes,
             baseline.metrics.primary_metric.value,
             primary,
             link_base=link_base,
+            best_experiment_id=ranking.candidates[0].experiment_id
+            if ranking is not None and ranking.candidates
+            else None,
         )
         sections.append(
-            f"<h2>Experiment tree</h2>{chart}"
-            "<p class='sub'>Every experiment builds on the baseline or on its parent "
-            "(branched). Values are measured against the frozen baseline.</p>"
+            f"<h2>Experiment graph</h2>{chart}"
+            "<p class='sub'>Each experiment builds on the baseline, on one parent, or "
+            "— dotted edges — on several at once. Values are measured against the "
+            "frozen baseline, and the green chain traces the ancestry of the best "
+            "result. Hover a card for its full title, parents and observation.</p>"
         )
 
     all_points = progress_points(
@@ -682,23 +687,24 @@ def build_stats(
     ]
 
 
-def tree_nodes(
+def graph_nodes(
     experiments: list[Experiment],
     executions: list[ExperimentExecution],
     ranking: RankingReport | None,
-) -> list[TreeNode]:
+) -> list[GraphNode]:
     deltas: dict[str, float | None] = {}
     if ranking is not None:
         for row in [*ranking.candidates, *ranking.rejected]:
             deltas[row.experiment_id] = row.primary_delta_pct
     return [
-        TreeNode(
+        GraphNode(
             experiment_id=e.experiment_id,
             title=e.title,
             status=e.status.value,
             value=_latest_full_value(executions, e.experiment_id),
             delta_pct=deltas.get(e.experiment_id),
-            parent_id=e.parent_experiment_id,
+            parent_ids=list(e.parent_experiment_ids),
+            observation=e.observation,
         )
         for e in experiments
     ]

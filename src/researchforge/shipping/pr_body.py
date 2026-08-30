@@ -51,6 +51,7 @@ def build_pr_body(
     validation: ValidationSummary | None,
     preship: ExperimentExecution | None,
     report_path: str | None,
+    provenance: str | None = None,
 ) -> str:
     spec = contract.spec
     primary = spec.objective.primary_metric.name
@@ -152,6 +153,8 @@ def build_pr_body(
     lines += ["## Changed files", ""]
     lines += [f"- `{path}`" for path in winner.changed_files]
     lines.append("")
+    if provenance:
+        lines += [provenance, ""]
 
     lines += [
         "## Reproduction",

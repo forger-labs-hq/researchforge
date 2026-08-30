@@ -1,0 +1,10 @@
+# Benchmark output, rewritten on every run.
+artifacts/
+
+# Checkpoints and datasets ultralytics downloads on first use.
+*.pt
+datasets/
+runs/
+
+.researchforge/
+__pycache__/

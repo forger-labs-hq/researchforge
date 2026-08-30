@@ -106,6 +106,53 @@ class TestExperimentPlanContext:
 
 
 class TestPlanImport:
+    def test_bare_patch_file_name_resolves_to_the_patches_dir(
+        self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path
+    ) -> None:
+        """`patch_file: improve.patch` means the only place a patch may live."""
+        staging = isolated_project_dir / ".researchforge" / "experiments"
+        (staging / "patches").mkdir(parents=True, exist_ok=True)
+        (staging / "patches" / "improve.patch").write_text(IMPROVING_PATCH, encoding="utf-8")
+        plan = staging / "plan.yaml"
+        plan.write_text(
+            "hypothesis_id: hyp-001\n"
+            "approach_summary: Try caching variants.\n"
+            "experiments:\n"
+            "  - key: improve\n"
+            "    title: Variant improve\n"
+            "    change_summary: Change for improve.\n"
+            "    patch_file: improve.patch\n",
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(app, ["experiment", "import", str(plan)])
+
+        assert result.exit_code == 0, result.output
+        assert "1 runnable" in result.output
+
+    def test_patch_file_outside_the_patches_dir_is_refused(
+        self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path
+    ) -> None:
+        staging = isolated_project_dir / ".researchforge" / "experiments"
+        (staging / "patches").mkdir(parents=True, exist_ok=True)
+        (staging / "sneaky.patch").write_text(IMPROVING_PATCH, encoding="utf-8")
+        plan = staging / "plan.yaml"
+        plan.write_text(
+            "hypothesis_id: hyp-001\n"
+            "approach_summary: Try caching variants.\n"
+            "experiments:\n"
+            "  - key: sneaky\n"
+            "    title: Variant sneaky\n"
+            "    change_summary: Change for sneaky.\n"
+            "    patch_file: ../sneaky.patch\n",
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(app, ["experiment", "import", str(plan)])
+
+        assert result.exit_code == 1
+        assert "must live inside" in result.output
+
     def test_valid_plan_imports(
         self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path
     ) -> None:

@@ -11,7 +11,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 
 import httpx
 from pydantic import BaseModel
@@ -119,6 +119,28 @@ def parse_atom_feed(xml_text: str) -> tuple[list[ArxivEntry], int | None]:
     return entries, total
 
 
+ARXIV_DATE_CEILING = "999912312359"
+"""An upper bound no submission can exceed. arXiv's date range needs both ends."""
+
+
+def build_search_query(
+    query: str, categories: list[str], submitted_since: date | None
+) -> str:
+    """The arXiv `search_query` for one search, with its filters applied.
+
+    Filtering by date at the API rather than after fetching matters: the fetch
+    is capped, so a post-fetch filter would spend that cap on papers it then
+    discards and return fewer recent papers than asked for.
+    """
+    clauses = [f"({query})"]
+    if categories:
+        clauses.append("(" + " OR ".join(f"cat:{category}" for category in categories) + ")")
+    if submitted_since is not None:
+        start = submitted_since.strftime("%Y%m%d") + "0000"
+        clauses.append(f"submittedDate:[{start} TO {ARXIV_DATE_CEILING}]")
+    return " AND ".join(clauses) if len(clauses) > 1 else query
+
+
 class ArxivClient:
     BASE_URL = "https://export.arxiv.org/api/query"
 
@@ -128,6 +150,8 @@ class ArxivClient:
         sleep: Callable[[float], None] = time.sleep,
         request_interval_s: float = 3.0,
         max_retries: int = 2,
+        category_filter: list[str] | None = None,
+        submitted_since: date | None = None,
     ) -> None:
         self._client = client or httpx.Client(
             timeout=30.0,
@@ -141,6 +165,8 @@ class ArxivClient:
         self._interval = request_interval_s
         self._max_retries = max_retries
         self._last_request_at: float | None = None
+        self._category_filter = category_filter or []
+        self._submitted_since = submitted_since
 
     def _throttle(self) -> None:
         if self._last_request_at is not None:
@@ -180,12 +206,13 @@ class ArxivClient:
         """Fetch up to `max_results` entries for `query`, paging politely."""
         collected: list[ArxivEntry] = []
         total: int | None = None
+        search_q = build_search_query(query, self._category_filter, self._submitted_since)
         while len(collected) < max_results:
             remaining = max_results - len(collected)
             request_size = min(page_size, remaining)
             text = self._get(
                 {
-                    "search_query": query,
+                    "search_query": search_q,
                     "start": len(collected),
                     "max_results": request_size,
                     "sortBy": "relevance",

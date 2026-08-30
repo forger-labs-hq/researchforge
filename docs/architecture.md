@@ -1,13 +1,12 @@
 # Architecture — Phase 1 (complete)
 
 > This document describes the codebase at the **Phase 1 open-source beta**.
-> See
-> [RESEARCHFORGE_PHASED_BUILD_SPEC.md](RESEARCHFORGE_PHASED_BUILD_SPEC.md)
-> for the full product spec, [research-mode.md](research-mode.md) for the
-> research workflow, [experiment-mode.md](experiment-mode.md) for the
-> contract → baseline → funnel → shipping workflow,
-> [claude-mode.md](claude-mode.md) for driving everything from Claude Code,
-> and [security.md](security.md) for the security model.
+> See [demo.md](demo.md) to watch it run, [research-mode.md](research-mode.md)
+> for the research workflow, [experiment-mode.md](experiment-mode.md) for the
+> contract → baseline → funnel → shipping workflow, and
+> [claude-mode.md](claude-mode.md) for driving everything from Claude Code.
+> The security model is in the README under
+> [Security & Isolation](../README.md#security--isolation--what-runs-where).
 
 ## Module layout
 

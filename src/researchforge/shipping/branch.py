@@ -45,6 +45,7 @@ from researchforge.execution.experiments import (
 from researchforge.execution.runner import CommandRunner, SubprocessRunner
 from researchforge.execution.validation import summarize_validation
 from researchforge.execution.worktrees import WorktreeManager
+from researchforge.experiments.graph import ancestor_order
 from researchforge.storage.deliverable_repository import (
     get_branch_deliverable,
     insert_deliverable,
@@ -54,6 +55,7 @@ from researchforge.storage.experiment_repository import (
     list_executions,
     list_experiments,
     list_runs,
+    patch_ancestry,
     update_experiment,
 )
 from researchforge.storage.hypothesis_repository import get_hypothesis
@@ -250,14 +252,17 @@ def prepare_ship(
             prep.contract.spec.objective.primary_metric.direction,
         )
 
+    # The shipped branch is the whole lineage, not just this experiment's own
+    # diff: everything it was measured on top of has to land with it. A merge
+    # has several parents, so the order comes from a topological walk and a
+    # shared ancestor contributes once. A re-authored merge ships as its own
+    # patch alone, which is what was measured.
     ancestor_patches: list[str] = []
-    ancestor = experiment.parent_experiment_id
-    while ancestor is not None:
-        parent_experiment = get_experiment(conn, ancestor)
-        assert parent_experiment is not None  # import validated the chain
-        ancestor_patches.append(parent_experiment.patch_text)
-        ancestor = parent_experiment.parent_experiment_id
-    ancestor_patches.reverse()
+    for ancestor_id in ancestor_order(experiment.experiment_id, patch_ancestry(conn)):
+        ancestor_experiment = get_experiment(conn, ancestor_id)
+        assert ancestor_experiment is not None  # import validated the lineage
+        if ancestor_experiment.patch_text:
+            ancestor_patches.append(ancestor_experiment.patch_text)
 
     return ShipPreparation(
         prep=prep,
@@ -328,7 +333,7 @@ def reconstruct_branch(
     message_file = ship_artifacts / "commit_message.txt"
     message_file.write_text(message, encoding="utf-8")
 
-    # Branched winners ship their full ancestor chain, root first.
+    # Branched winners ship their full ancestor chain, roots first.
     chain_files: list[Path] = []
     for depth, ancestor_text in enumerate(ship.ancestor_patches):
         chain_file = ship_artifacts / f"chain-{depth}.patch"
@@ -339,7 +344,10 @@ def reconstruct_branch(
     try:
         for chain_file in chain_files:
             manager.apply_patch(worktree, chain_file)
-        manager.apply_patch(worktree, patch_file)
+        # A merge or env-override winner has no diff of its own: the chain above
+        # already is the change, and git refuses an empty patch.
+        if ship.experiment.patch_text:
+            manager.apply_patch(worktree, patch_file)
         sha = manager.commit_all_in_worktree(worktree, message_file)
     finally:
         manager.remove(worktree_name)

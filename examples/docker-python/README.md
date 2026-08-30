@@ -15,4 +15,4 @@ a running Docker daemon (`researchforge doctor` checks). Everything else in
 
 Docker improves process and dependency isolation but is **not** a hardened
 sandbox for hostile code — run only repositories you trust (see
-[docs/security.md](../../docs/security.md)).
+[Security & Isolation](../../README.md#security--isolation--what-runs-where)).

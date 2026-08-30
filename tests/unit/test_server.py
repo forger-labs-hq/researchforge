@@ -375,7 +375,7 @@ class TestExperimentDrilldown:
         assert "Artifacts on disk" in text
         assert client.get("/experiments/exp-999").status_code == 404
 
-    def test_dashboard_tree_links_to_drilldown(self, client) -> None:  # type: ignore[no-untyped-def]
+    def test_dashboard_graph_links_to_drilldown(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get("/dashboard")
         assert "href='/experiments/exp-001'" in response.text
 
@@ -392,6 +392,77 @@ class TestExperimentDrilldown:
         assert "work locations" in text
         expected = Path.cwd().resolve() / ".researchforge" / "artifacts" / "experiments" / "run-001"
         assert str(expected) in text
+
+
+class TestLiveExperimentGraph:
+    def test_the_experiments_page_renders_the_graph(self, client) -> None:  # type: ignore[no-untyped-def]
+        text = client.get("/experiments").text
+        assert "Experiment graph" in text
+        assert "data-graph-node='baseline'" in text
+        assert "data-graph-node='exp-001'" in text
+
+    def test_every_card_is_a_link_to_its_experiment(self, client) -> None:  # type: ignore[no-untyped-def]
+        text = client.get("/experiments").text
+        assert "href='/experiments/exp-001'" in text
+
+    def test_the_graph_explains_its_own_notation(self, client) -> None:  # type: ignore[no-untyped-def]
+        text = client.get("/experiments").text
+        assert "LEGEND" in text
+        assert "merge (multi-parent)" in text
+
+    def test_a_wide_graph_scrolls_instead_of_shrinking(self, client) -> None:  # type: ignore[no-untyped-def]
+        text = client.get("/experiments").text
+        assert ".graph { overflow-x: auto" in text
+
+    def test_a_project_without_a_baseline_shows_no_graph(
+        self, cli_runner: CliRunner, contracted_project: Path, isolated_project_dir: Path
+    ) -> None:
+        from researchforge.server.pages import project_graph
+
+        assert project_graph(read_state()) == ""
+
+
+class TestRoundsByExperiment:
+    def test_experiments_are_mapped_to_the_round_that_ran_them(self) -> None:
+        from datetime import UTC, datetime
+
+        from researchforge.autorun.state import (
+            AutorunState,
+            RoundRecord,
+            rounds_by_experiment,
+        )
+
+        now = datetime.now(UTC)
+        state = AutorunState(
+            started_at=now,
+            updated_at=now,
+            rounds=[
+                RoundRecord(
+                    round_num=1,
+                    promising=["exp-001"],
+                    rejected=["exp-002"],
+                    completed_at=now,
+                ),
+                RoundRecord(
+                    round_num=2,
+                    promising=["exp-003"],
+                    failed=["exp-004"],
+                    completed_at=now,
+                ),
+            ],
+        )
+
+        assert rounds_by_experiment(state) == {
+            "exp-001": 1,
+            "exp-002": 1,
+            "exp-003": 2,
+            "exp-004": 2,
+        }
+
+    def test_a_project_that_never_ran_a_loop_has_no_rounds(self) -> None:
+        from researchforge.autorun.state import rounds_by_experiment
+
+        assert rounds_by_experiment(None) == {}
 
 
 class TestPathsCli:

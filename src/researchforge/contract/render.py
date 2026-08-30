@@ -38,6 +38,16 @@ def render_contract_yaml(spec: ContractSpec) -> str:
         f"    direction: {spec.objective.primary_metric.direction.value}  # maximize | minimize",
     ]
 
+    target = spec.objective.primary_metric.target_value
+    if target is None:
+        lines.append(
+            "    # target_value: 0.85   # optional — `autorun` stops once the metric reaches it"
+        )
+    else:
+        lines.append(
+            f"    target_value: {target}  # `autorun` stops once the metric reaches this"
+        )
+
     if spec.objective.hard_constraints:
         lines.append("  hard_constraints:")
         for constraint in spec.objective.hard_constraints:
@@ -68,8 +78,10 @@ def render_contract_yaml(spec: ContractSpec) -> str:
         "",
         "execution:",
         f"  mode: {e.mode.value}  # auto | docker | venv",
-        "  # venv mode requires trusted_repository: true — it does NOT isolate code",
-        "  # from your machine. Docker is preferred when available.",
+        "  # ⚡ Docker strongly recommended for public/cloned repos (e.g. from GitHub).",
+        "  #    Set mode: docker and run: researchforge generate dockerfile",
+        "  #    Docker avoids ALL setup_command fragility and isolates your machine.",
+        "  # venv mode: faster for your own projects, but does NOT isolate code.",
         f"  trusted_repository: {str(e.trusted_repository).lower()}",
     ]
     if e.setup_command is not None:
@@ -89,6 +101,7 @@ def render_contract_yaml(spec: ContractSpec) -> str:
         f"  cpu_limit: {e.cpu_limit:g}",
         f"  memory_mb: {e.memory_mb}",
         f"  max_experiments: {e.max_experiments}",
+        "  # stall: 3  # stop after N consecutive non-improvements (comment out to run all)",
         "",
         "permissions:",
     ]

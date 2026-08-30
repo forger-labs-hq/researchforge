@@ -25,6 +25,10 @@ dependencies = [
   "pydantic>=2.6",
   "httpx>=0.27",
   "pyyaml>=6.0",
+  # Built-in AI providers — no extra install step needed
+  "anthropic>=0.27",
+  "google-genai>=1.0",
+  "openai>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -67,6 +71,12 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 python_version = "3.12"
 strict = true
 mypy_path = "src"
+
+# AI provider SDKs are optional extras: the code imports them lazily and raises
+# a helpful error when absent, so type-checking must not depend on them.
+[[tool.mypy.overrides]]
+module = ["anthropic.*", "google.*", "openai.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

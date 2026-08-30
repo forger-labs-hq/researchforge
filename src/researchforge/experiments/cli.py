@@ -42,10 +42,82 @@ results_app = typer.Typer(name="results", no_args_is_help=True, help="Experiment
 
 @experiment_app.command("plan")
 def plan_command(
-    hypothesis_id: Annotated[str, typer.Argument(help="e.g. hyp-001")],
+    hypothesis_id: Annotated[
+        str | None,
+        typer.Argument(help="e.g. hyp-001. Omit with --all to plan every pending hypothesis."),
+    ] = None,
+    all_hypotheses: Annotated[
+        bool,
+        typer.Option("--all", help="Plan ALL pending hypotheses (those without a plan yet)."),
+    ] = False,
+    synthesize: Annotated[
+        bool,
+        typer.Option(
+            "--synthesize",
+            help="Use a built-in AI provider to generate plan.yaml + patches automatically.",
+        ),
+    ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider", "-p",
+            help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Override model name."),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Export the experiment-planning context for a hypothesis."""
+    """Export the experiment-planning context for a hypothesis.
+
+    With --synthesize, calls a built-in AI provider to write plan.yaml + patches
+    automatically, then imports the plan.
+
+    Use --all to plan every pending hypothesis at once (requires --synthesize):
+
+      export ANTHROPIC_API_KEY=sk-ant-...
+      researchforge experiment plan --all --synthesize
+      researchforge experiment plan hyp-001 --synthesize
+    """
+    # ── --all mode ────────────────────────────────────────────────────────────
+    if all_hypotheses:
+        if not synthesize:
+            typer.echo("--all requires --synthesize (AI plans all hypotheses automatically).")
+            raise typer.Exit(code=1)
+        from researchforge.autorun.engine import get_pending_hypotheses, plan_all_hypotheses
+
+        if not json_output:
+            typer.echo("Planning all pending hypotheses…")
+        with closing(open_project_db()) as conn:
+            pending = get_pending_hypotheses(conn)
+            if not pending:
+                typer.echo("No pending hypotheses. Run `researchforge research synthesize` first.")
+                raise typer.Exit(code=0)
+            if not json_output:
+                typer.echo(f"  Found {len(pending)} pending hypothesis(es): "
+                           f"{', '.join(h.hypothesis_id for h in pending)}")
+            plan_ids = plan_all_hypotheses(
+                conn, pending, provider, model,
+                parent_experiment_id=None,
+                on_progress=None if json_output else lambda m: typer.echo(f"  {m}"),
+            )
+
+        if json_output:
+            typer.echo(json.dumps({"plan_ids": plan_ids, "count": len(plan_ids)}))
+        else:
+            typer.echo(f"✓ Planned {len(plan_ids)} hypothesis(es): {', '.join(plan_ids)}")
+            typer.echo(
+                "Next: researchforge experiment approve <plan-id>  OR  researchforge autorun"
+            )
+        return
+
+    # ── single hypothesis mode ────────────────────────────────────────────────
+    if not hypothesis_id:
+        typer.echo("Provide a hypothesis ID (e.g. hyp-001) or use --all.")
+        raise typer.Exit(code=1)
+
     with closing(open_project_db()) as conn:
         try:
             context = build_experiment_context(conn, hypothesis_id)
@@ -53,16 +125,90 @@ def plan_command(
             typer.echo(str(exc))
             raise typer.Exit(code=1) from None
 
-    if json_output:
-        echo_model(context)
+    if not synthesize:
+        if json_output:
+            echo_model(context)
+            return
+        path = write_experiment_context(context)
+        typer.echo(f"Experiment context written to {path}")
+        typer.echo("Options:")
+        typer.echo(
+            "  A) Auto-generate plan with AI:  researchforge experiment plan hyp-001 "
+            "--synthesize --provider anthropic|google|openai"
+        )
+        typer.echo("  B) Ask Claude / Cursor to read the context and write:")
+        typer.echo(f"       - {context.expected_artifacts.plan_path}")
+        typer.echo(
+            "       - one unified diff per variant under "
+            f"{context.expected_artifacts.patches_dir}/"
+        )
+        typer.echo("     Then import the plan:")
+        typer.echo("       researchforge experiment import .researchforge/experiments/plan.yaml")
         return
-    path = write_experiment_context(context)
-    typer.echo(f"Experiment context written to {path}")
-    typer.echo("Ask Claude to read it and write:")
-    typer.echo(f"  - {context.expected_artifacts.plan_path}")
-    typer.echo(f"  - one unified diff per variant under {context.expected_artifacts.patches_dir}/")
-    typer.echo("Then import the plan:")
-    typer.echo("  researchforge experiment import .researchforge/experiments/plan.yaml")
+
+    # --synthesize path: call AI to generate plan.yaml + patches
+    from researchforge.ai.plan_gen import generate_experiment_plan, write_patch_files
+    from researchforge.ai.service import resolve_provider
+
+    try:
+        ai_provider = resolve_provider(provider_hint=provider, model_hint=model)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+
+    from researchforge.ai.plan_gen import planning_phase_label
+    from researchforge.utils.progress import LiveProgress
+
+    # Export context first
+    write_experiment_context(context)
+
+    try:
+        with LiveProgress(
+            f"Plan for {context.hypothesis.hypothesis_id} · {ai_provider.name}",
+            enabled=not json_output,
+        ) as live:
+            live.phase(planning_phase_label(context, ai_provider.name))
+            plan_yaml, patches = generate_experiment_plan(context, ai_provider)
+    except ValueError as exc:
+        typer.echo(f"Plan generation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+    # Write plan.yaml
+    from pathlib import Path as _Path
+
+    plan_path = _Path(context.expected_artifacts.plan_path)
+    patches_dir = _Path(context.expected_artifacts.patches_dir)
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(plan_yaml, encoding="utf-8")
+    written_patches = write_patch_files(patches_dir, patches)
+
+    if not json_output:
+        typer.echo(f"✓ Wrote {plan_path}")
+        for path in written_patches:
+            typer.echo(f"✓ Wrote {path}")
+        typer.echo("Importing plan…")
+
+    # Import the plan
+    with closing(open_project_db()) as conn:
+        result, plan = import_experiment_plan(conn, plan_path)
+
+    if json_output:
+        typer.echo(json.dumps({
+            "plan_path": str(plan_path),
+            "ok": result.ok,
+            "errors": result.errors,
+            "warnings": result.warnings,
+            "plan_id": plan.plan_id if plan else None,
+        }, indent=2))
+        return
+
+    if result.ok and plan:
+        typer.echo(f"✓ Plan {plan.plan_id} imported.")
+        typer.echo(f"Next: researchforge experiment approve {plan.plan_id}")
+    else:
+        for err in result.errors:
+            typer.echo(f"  ✗ {err}")
+        raise typer.Exit(code=1)
 
 
 @experiment_app.command("import")
@@ -89,7 +235,11 @@ def import_command(
 def _print_experiment(experiment: Experiment) -> None:
     typer.echo(f"[{experiment.experiment_id}] {experiment.title}  ({experiment.status.value})")
     typer.echo(f"Plan:       {experiment.plan_id}   Hypothesis: {experiment.hypothesis_id}")
-    if experiment.parent_experiment_id:
+    if experiment.is_merge:
+        combined = " + ".join(experiment.parent_experiment_ids)
+        note = " (patch contains both)" if experiment.patch_includes_parents else ""
+        typer.echo(f"Parents:    {combined} (merge){note}")
+    elif experiment.parent_experiment_id:
         typer.echo(f"Parent:     {experiment.parent_experiment_id} (branched experiment)")
     typer.echo(f"Change:     {experiment.change_summary}")
     typer.echo(f"Files:      {', '.join(experiment.changed_files) or '(none)'}")
@@ -97,6 +247,8 @@ def _print_experiment(experiment: Experiment) -> None:
         typer.echo(
             f"Decision:   {experiment.decision.outcome.value} — {experiment.decision.reason}"
         )
+    if experiment.observation:
+        typer.echo(f"Observed:   {experiment.observation}")
     if experiment.path_violations:
         for violation in experiment.path_violations:
             typer.echo(f"  violation: {violation.path} ({violation.rule.value})")
@@ -222,10 +374,22 @@ MonitorOption = typer.Option(
 @experiment_app.command("run")
 def run_command(
     plan_id: Annotated[str, typer.Argument(help="e.g. plan-001")],
+    stall: Annotated[
+        int | None,
+        typer.Option(
+            "--stall",
+            min=1,
+            help="Stop after N consecutive non-improvements. Overrides the contract setting.",
+        ),
+    ] = None,
     monitor: Annotated[bool | None, MonitorOption] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Run the approved experiments: screening then full benchmark, one at a time.
+
+    Runs all approved experiments automatically until stall is reached or all
+    complete. The stall count (N consecutive non-improvements) comes from the
+    contract's execution.stall setting; override it here with --stall N.
 
     The run executes in the foreground — Ctrl-C stops it safely (worktrees
     stay isolated; `researchforge experiment resume <run-id>` continues, or
@@ -259,7 +423,27 @@ def run_command(
                 typer.echo(f"warning: {warning}")
             raise typer.Exit(code=1)
 
-        summary = execute_run(conn, prep, run)
+        effective_stall = stall or prep.contract.spec.execution.stall
+        if effective_stall and not json_output:
+            typer.echo(f"Stall: stop after {effective_stall} consecutive non-improvements.")
+
+        from researchforge.storage.experiment_repository import list_experiments as _list_exp
+        from researchforge.utils.progress import LiveProgress
+
+        n_experiments = sum(
+            1 for e in _list_exp(conn, prep.plan.plan_id)
+            if e.status.value == "approved"
+        )
+        label = f"Running {n_experiments} experiment{'s' if n_experiments != 1 else ''}"
+        with LiveProgress(label, enabled=not json_output) as live:
+            summary = execute_run(
+                conn,
+                prep,
+                run,
+                stall_override=stall,
+                on_phase=live.phase,
+                on_result=live.note,
+            )
     _emit_summary(summary, json_output)
 
 
@@ -286,6 +470,10 @@ def resume_command(
 def start_command(
     file: Annotated[Path, typer.Argument(help="Experiment plan artifact (plan.yaml).")],
     yes: Annotated[bool, typer.Option("--yes", help="Skip the interactive confirmation.")] = False,
+    stall: Annotated[
+        int | None,
+        typer.Option("--stall", min=1, help="Stop after N consecutive non-improvements."),
+    ] = None,
     monitor: Annotated[bool | None, MonitorOption] = None,
     json_output: JsonOption = False,
 ) -> None:
@@ -304,7 +492,7 @@ def start_command(
         typer.echo(f"warning: {warning}")
 
     approve_command(plan_id=plan.plan_id, yes=yes, json_output=False)
-    run_command(plan_id=plan.plan_id, monitor=monitor, json_output=json_output)
+    run_command(plan_id=plan.plan_id, stall=stall, monitor=monitor, json_output=json_output)
 
 
 @experiment_app.command("abandon")
@@ -533,6 +721,28 @@ def validate_command(
         list[str] | None,
         typer.Option("--experiment", "-e", help="Validate only these experiment ids."),
     ] = None,
+    n: Annotated[
+        int | None,
+        typer.Option(
+            "--n",
+            min=1,
+            help=(
+                "Repeats per finalist for this validation, overriding the "
+                "contract's validation.repeat_finalists."
+            ),
+        ),
+    ] = None,
+    stdev_max: Annotated[
+        float | None,
+        typer.Option(
+            "--stdev-max",
+            min=0.0,
+            help=(
+                "Refuse to validate a finalist whose repeats have a standard "
+                "deviation above this, however good its average looks."
+            ),
+        ),
+    ] = None,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the cost confirmation.")] = False,
     json_output: JsonOption = False,
 ) -> None:
@@ -553,19 +763,26 @@ def validate_command(
                 if e.status is ExperimentStatus.PROMISING
                 and (experiment is None or e.experiment_id in experiment)
             ]
-            repeats = contract.spec.validation.repeat_finalists
+            repeats = n or contract.spec.validation.repeat_finalists
             worst = len(targets) * repeats * contract.spec.execution.timeout_minutes
             typer.echo(
                 f"Will re-run the full benchmark {repeats}x for "
                 f"{len(targets)} experiment(s) (~{worst} min worst case)."
             )
+            if stdev_max is not None:
+                typer.echo(
+                    f"A finalist whose repeats vary by more than σ = {stdev_max:.4g} "
+                    "will be rejected."
+                )
             confirmation = typer.prompt("Type 'validate' to proceed")
             if confirmation.strip().lower() != "validate":
                 typer.echo("Not started.")
                 raise typer.Exit(code=1)
 
         try:
-            outcome = validate_run(conn, run_id, experiment_ids=experiment)
+            outcome = validate_run(
+                conn, run_id, experiment_ids=experiment, repeats=n, stdev_max=stdev_max
+            )
         except ExperimentBlockedError as exc:
             typer.echo(str(exc))
             raise typer.Exit(code=1) from None
@@ -591,5 +808,9 @@ def validate_command(
             f"{summary.experiment_id}: {summary.outcome.value} "
             f"({summary.succeeded_attempts}/{summary.attempts} attempts, {spread})"
         )
+        if summary.stdev_exceeded:
+            typer.echo(
+                f"  rejected for spread: σ exceeds the {summary.stdev_max:.4g} limit"
+            )
     if any(s.outcome is ExperimentStatus.VALIDATED for s in outcome.summaries):
         typer.echo("Next: researchforge ship branch")

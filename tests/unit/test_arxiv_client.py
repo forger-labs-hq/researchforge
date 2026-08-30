@@ -1,11 +1,14 @@
+from datetime import date
 from pathlib import Path
 
 import httpx
 import pytest
 
 from researchforge.research.arxiv_client import (
+    ARXIV_DATE_CEILING,
     ArxivClient,
     ArxivError,
+    build_search_query,
     parse_atom_feed,
 )
 
@@ -55,6 +58,29 @@ def _client_with(handler: httpx.MockTransport, sleeps: list[float] | None = None
         client=httpx.Client(transport=handler),
         sleep=recorded.append,
     )
+
+
+class TestBuildSearchQuery:
+    def test_an_unfiltered_query_is_passed_through_untouched(self) -> None:
+        assert build_search_query("all:routing", [], None) == "all:routing"
+
+    def test_categories_are_joined_with_or(self) -> None:
+        query = build_search_query("all:routing", ["cs.LG", "cs.AI"], None)
+        assert query == "(all:routing) AND (cat:cs.LG OR cat:cs.AI)"
+
+    def test_a_since_date_becomes_an_arxiv_date_range(self) -> None:
+        query = build_search_query("all:routing", [], date(2024, 6, 1))
+        assert query == f"(all:routing) AND submittedDate:[202406010000 TO {ARXIV_DATE_CEILING}]"
+
+    def test_categories_and_a_date_apply_together(self) -> None:
+        query = build_search_query("all:routing", ["cs.LG"], date(2025, 1, 31))
+        assert "cat:cs.LG" in query
+        assert "submittedDate:[202501310000" in query
+        assert query.count(" AND ") == 2
+
+    def test_the_date_starts_at_midnight_so_the_day_itself_is_included(self) -> None:
+        query = build_search_query("all:routing", [], date(2024, 6, 1))
+        assert "202406010000" in query
 
 
 class TestArxivClientSearch:
@@ -134,6 +160,21 @@ class TestArxivClientSearch:
         client = _client_with(httpx.MockTransport(handler))
         with pytest.raises(ArxivError, match="after 3 attempts"):
             client.search("all:routing", max_results=3)
+
+    def test_since_filters_at_the_api_not_after_fetching(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, text=_fixture("search_page1.xml"))
+
+        client = ArxivClient(
+            client=httpx.Client(transport=httpx.MockTransport(handler)),
+            sleep=lambda s: None,
+            submitted_since=date(2024, 6, 1),
+        )
+        client.search("all:routing", max_results=3, page_size=3)
+        assert "submittedDate:[202406010000 TO" in requests[0].url.params["search_query"]
 
     def test_user_agent_header_sent(self) -> None:
         # The default client carries the UA; with an injected client the

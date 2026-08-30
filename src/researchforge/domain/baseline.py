@@ -30,6 +30,28 @@ class EnvironmentFingerprint(BaseModel):
     commit_sha: str
 
 
+class BaselineRepeats(BaseModel):
+    """What the individual measurements showed when a baseline was run more than once.
+
+    A noisy benchmark measured once gives a reference point that is partly luck,
+    and every improvement is then compared against that luck. Repeating it and
+    averaging removes some of that, but only if the spread stays visible: a
+    baseline with a wide spread cannot support a small claimed improvement, and
+    this is where a reader can see that.
+    """
+
+    requested: int = Field(ge=1)
+    values: list[float] = Field(min_length=1)
+    """The primary metric from each repeat that succeeded, in the order they ran."""
+
+    failed: int = Field(default=0, ge=0)
+    mean: float
+    stdev: float | None = None
+    """None when only one repeat succeeded — a spread needs two measurements."""
+
+    coefficient_of_variation: float | None = None
+
+
 class BaselineRun(BaseModel):
     baseline_id: str
     contract_id: str
@@ -41,6 +63,9 @@ class BaselineRun(BaseModel):
     status: BaselineStatus
     failure_reason: str | None = None
     metrics: MetricResult | None = None
+    repeats: BaselineRepeats | None = None
+    """Set only when the baseline was measured more than once; `metrics` is then the mean."""
+
     warnings: list[str] = Field(default_factory=list)
     fingerprint: EnvironmentFingerprint
     stdout_path: str

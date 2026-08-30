@@ -412,7 +412,7 @@ def validated_project(
     return funnel_project
 
 
-def _fixture_arxiv_client() -> ArxivClient:
+def _fixture_arxiv_client(**kwargs: object) -> ArxivClient:
     """Client serving fixture pages (page1 for start=0, page2 otherwise), no sleeping."""
 
     def handler(request: httpx.Request) -> httpx.Response:

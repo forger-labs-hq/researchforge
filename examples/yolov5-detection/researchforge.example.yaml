@@ -1,0 +1,66 @@
+# Copy to researchforge.yaml, review, then `researchforge contract approve`.
+#
+# IMPORTANT: the inference_ms constraint below is set from a baseline measured on
+# one specific machine (CPU, no MPS). Detection accuracy is deterministic and
+# will reproduce exactly; inference latency will not — it depends on your CPU and
+# on what else the machine is doing. Measure your own baseline first and set the
+# constraint from that:
+#
+#   researchforge baseline run --n-runs 5     # freezes the mean, records the spread
+#   researchforge baseline show
+#
+# See README.md for the numbers this file was written against.
+version: 1
+project:
+  name: yolov5-detection
+  mode: improve_repository
+objective:
+  description: "Improve YOLOv5 detection mAP@0.5 on COCO128 without exceeding the inference budget"
+  primary_metric:
+    name: map50
+    direction: maximize
+    target_value: 0.78
+  hard_constraints:
+    - name: inference_ms
+      operator: "<="
+      value: 200
+  secondary_metrics:
+    - inference_ms
+    - map50_95
+    - recall
+    - precision
+repository:
+  baseline_ref: main
+execution:
+  # Explicitly venv, not auto: this example ships a Dockerfile, and `auto`
+  # prefers Docker whenever it finds one. Set `docker` here to use it instead —
+  # both work, but never compare numbers across the two.
+  mode: venv
+  trusted_repository: true
+  setup_command: "pip install --upgrade pip && pip install -r requirements.txt"
+  screening_command: "python benchmarks/evaluate.py --quick"
+  full_command: "python benchmarks/evaluate.py"
+  result_file: artifacts/results.json
+  # torch is a large install and the first run also downloads weights and
+  # COCO128, so the first evaluation is far slower than later ones.
+  timeout_minutes: 30
+  cpu_limit: 4
+  memory_mb: 8192
+  max_experiments: 6
+permissions:
+  editable_paths:
+    - src/
+  protected_paths:
+    - benchmarks/
+network:
+  # Required: ultralytics fetches the checkpoint and COCO128 on first use.
+  # Bake them into the Dockerfile to run with mode: none.
+  mode: enabled
+secrets:
+  forward_environment_variables: []
+validation:
+  repeat_finalists: 3
+  require_existing_tests: false
+shipping:
+  allow_branch_creation: true
+  allow_draft_pr: false

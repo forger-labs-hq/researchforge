@@ -15,6 +15,8 @@ import typer
 
 from researchforge.analytics.cli import analytics_app
 from researchforge.analytics.service import record_event
+from researchforge.audit.cli import audit_app
+from researchforge.autorun.cli import autorun_command
 from researchforge.claude.cli import claude_app
 from researchforge.config.paths import is_initialized, researchforge_dir
 from researchforge.config.paths_cli import paths_command
@@ -23,6 +25,7 @@ from researchforge.cursor.cli import cursor_app
 from researchforge.domain.project import Project, ProjectMode, ProjectStatus
 from researchforge.execution.cli import baseline_app
 from researchforge.experiments.cli import experiment_app, results_app, validate_command
+from researchforge.generate import generate_app
 from researchforge.hypotheses.cli import hypotheses_app
 from researchforge.project.cli import project_app
 from researchforge.reporting.cli import report_app
@@ -147,26 +150,50 @@ def _offer_skills_once() -> None:
         )
 
 
-app.add_typer(project_app, name="project")
-app.add_typer(repo_app, name="repo")
-app.add_typer(research_app, name="research")
-app.add_typer(papers_app, name="papers")
-app.add_typer(hypotheses_app, name="hypotheses")
-app.add_typer(report_app, name="report")
-app.add_typer(contract_app, name="contract")
-app.add_typer(baseline_app, name="baseline")
-app.add_typer(experiment_app, name="experiment")
-app.add_typer(results_app, name="results")
-app.command("validate")(validate_command)
-app.command("dashboard")(dashboard_command)
-app.command("serve")(serve_command)
-app.command("hub")(hub_command)
-app.command("paths")(paths_command)
-app.add_typer(ship_app, name="ship")
-app.add_typer(paper_app, name="paper")
-app.add_typer(claude_app, name="claude")
-app.add_typer(cursor_app, name="cursor")
-app.add_typer(analytics_app, name="analytics")
+# `--help` groups the commands by the part of the workflow they belong to. The
+# Hub panel is named for what it is so nobody reaches for a hosted feature
+# expecting it to work from a bare checkout.
+SETUP = "Setup"
+RESEARCH = "Research"
+EXPERIMENTS = "Experiments"
+RESULTS = "Results & shipping"
+HUB = "Hub (hosted — requires a running hub)"
+INTEGRATIONS = "Editor integrations"
+
+app.add_typer(project_app, name="project", rich_help_panel=SETUP)
+app.add_typer(repo_app, name="repo", rich_help_panel=SETUP)
+app.add_typer(research_app, name="research", rich_help_panel=RESEARCH)
+app.add_typer(papers_app, name="papers", rich_help_panel=RESEARCH)
+app.add_typer(hypotheses_app, name="hypotheses", rich_help_panel=RESEARCH)
+app.add_typer(generate_app, name="generate", rich_help_panel=RESEARCH)
+app.add_typer(report_app, name="report", rich_help_panel=RESEARCH)
+app.add_typer(contract_app, name="contract", rich_help_panel=EXPERIMENTS)
+app.add_typer(baseline_app, name="baseline", rich_help_panel=EXPERIMENTS)
+app.add_typer(experiment_app, name="experiment", rich_help_panel=EXPERIMENTS)
+app.add_typer(results_app, name="results", rich_help_panel=RESULTS)
+app.command("autorun", rich_help_panel=EXPERIMENTS)(autorun_command)
+app.command("validate", rich_help_panel=EXPERIMENTS)(validate_command)
+app.command("dashboard", rich_help_panel=RESULTS)(dashboard_command)
+app.command("serve", rich_help_panel=HUB)(serve_command)
+app.command("hub", rich_help_panel=HUB)(hub_command)
+app.command("paths", rich_help_panel=SETUP)(paths_command)
+app.add_typer(ship_app, name="ship", rich_help_panel=RESULTS)
+app.add_typer(paper_app, name="paper", rich_help_panel=RESULTS)
+app.add_typer(audit_app, name="audit", rich_help_panel=RESULTS)
+app.add_typer(claude_app, name="claude", rich_help_panel=INTEGRATIONS)
+app.add_typer(cursor_app, name="cursor", rich_help_panel=INTEGRATIONS)
+app.add_typer(analytics_app, name="analytics", rich_help_panel=INTEGRATIONS)
+
+# ---------------------------------------------------------------------------
+# `researchforge run <plan.yaml>` — top-level alias for `experiment start`
+# ---------------------------------------------------------------------------
+from researchforge.experiments.cli import start_command as _start_command  # noqa: E402
+
+app.command(
+    "run",
+    help="Run an experiment plan (alias for `experiment start`).",
+    rich_help_panel=EXPERIMENTS,
+)(_start_command)
 
 # ---------------------------------------------------------------------------
 # `researchforge all` — install / uninstall / status for both IDE integrations
@@ -297,10 +324,10 @@ def all_status_command(
     _echo_cursor(cursor_report, False)
 
 
-app.add_typer(all_app, name="all")
+app.add_typer(all_app, name="all", rich_help_panel=INTEGRATIONS)
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def doctor(json_output: JsonOption = False) -> None:
     """Check that required and optional dependencies are available."""
     results = run_all_checks()
@@ -339,7 +366,7 @@ def doctor(json_output: JsonOption = False) -> None:
     record_event("doctor_passed")
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def init(
     claude: bool = typer.Option(
         False, "--claude", help="Also install the Claude Code skills into .claude/skills/."
@@ -534,7 +561,7 @@ def _next_action(
     return "Research complete — report generated. Attach a repository to run experiments."
 
 
-@app.command()
+@app.command(rich_help_panel=SETUP)
 def status(json_output: JsonOption = False) -> None:
     """Show the status of the current ResearchForge project."""
     from researchforge.config.paths import contract_path

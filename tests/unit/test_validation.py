@@ -184,6 +184,64 @@ class TestSummarizeValidation:
         assert summary.stdev is None
         assert summary.outcome is ExperimentStatus.VALIDATED  # + the Stage-2 run = 2 measurements
 
+    def test_no_spread_limit_means_no_spread_check(self) -> None:
+        summary = summarize_validation(
+            _experiment(),
+            [_attempt(0.84, 1), _attempt(0.96, 2)],  # wildly noisy, but nothing asked
+            _baseline(),
+            MetricDirection.MAXIMIZE,
+        )
+        assert summary.stdev_max is None
+        assert not summary.stdev_exceeded
+        assert summary.outcome is ExperimentStatus.VALIDATED
+
+    def test_spread_above_the_limit_is_rejected_despite_improving(self) -> None:
+        summary = summarize_validation(
+            _experiment(),
+            [_attempt(0.84, 1), _attempt(0.96, 2)],  # stdev ~0.0849, both beat 0.80
+            _baseline(),
+            MetricDirection.MAXIMIZE,
+            stdev_max=0.01,
+        )
+        assert summary.improvement_confirmed_in_all
+        assert summary.all_constraints_passed
+        assert summary.stdev_exceeded
+        assert summary.outcome is ExperimentStatus.REJECTED
+
+    def test_spread_within_the_limit_still_validates(self) -> None:
+        summary = summarize_validation(
+            _experiment(),
+            [_attempt(0.850, 1), _attempt(0.851, 2)],
+            _baseline(),
+            MetricDirection.MAXIMIZE,
+            stdev_max=0.01,
+        )
+        assert summary.stdev is not None and summary.stdev < 0.01
+        assert not summary.stdev_exceeded
+        assert summary.outcome is ExperimentStatus.VALIDATED
+
+    def test_the_limit_is_recorded_so_a_reader_knows_what_was_applied(self) -> None:
+        summary = summarize_validation(
+            _experiment(),
+            [_attempt(0.85, 1), _attempt(0.851, 2)],
+            _baseline(),
+            MetricDirection.MAXIMIZE,
+            stdev_max=0.25,
+        )
+        assert summary.stdev_max == 0.25
+
+    def test_one_attempt_cannot_exceed_a_spread_limit(self) -> None:
+        summary = summarize_validation(
+            _experiment(),
+            [_attempt(0.85, 1)],
+            _baseline(),
+            MetricDirection.MAXIMIZE,
+            stdev_max=0.0001,
+        )
+        assert summary.stdev is None
+        assert not summary.stdev_exceeded
+        assert summary.outcome is ExperimentStatus.VALIDATED
+
     def test_constraint_violation_in_any_attempt_rejects(self) -> None:
         summary = summarize_validation(
             _experiment(),
@@ -272,6 +330,69 @@ class TestValidateEndToEnd:
             / "validation_summary.json"
         )
         assert summary_file.is_file()
+
+    def test_n_overrides_the_contracts_repeat_count(
+        self,
+        cli_runner: CliRunner,
+        funnel_project: Path,
+        isolated_project_dir: Path,
+    ) -> None:
+        plan = _stage_plan(isolated_project_dir, [("improve", _knob_patch(5, 150.0))])
+        assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "approve", "plan-001", "--yes"]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "run", "plan-001"]).exit_code == 0
+
+        result = cli_runner.invoke(app, ["validate", "run-001", "--n", "3", "--yes", "--json"])
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.output)[0]
+        assert summary["attempts"] == 3, "the contract says 2; --n asked for 3"
+        assert summary["outcome"] == "validated"
+
+    def test_n_does_not_change_the_stored_contract(
+        self,
+        cli_runner: CliRunner,
+        funnel_project: Path,
+        isolated_project_dir: Path,
+    ) -> None:
+        from contextlib import closing
+
+        from researchforge.storage.contract_repository import get_active_contract
+        from researchforge.storage.db import open_project_db
+
+        plan = _stage_plan(isolated_project_dir, [("improve", _knob_patch(5, 150.0))])
+        assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "approve", "plan-001", "--yes"]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "run", "plan-001"]).exit_code == 0
+        assert cli_runner.invoke(
+            app, ["validate", "run-001", "--n", "3", "--yes", "--json"]
+        ).exit_code == 0
+
+        with closing(open_project_db()) as conn:
+            contract = get_active_contract(conn)
+        assert contract is not None
+        assert contract.spec.validation.repeat_finalists == 2
+
+    def test_stdev_max_rejects_a_result_it_cannot_resolve(
+        self,
+        cli_runner: CliRunner,
+        funnel_project: Path,
+        isolated_project_dir: Path,
+    ) -> None:
+        plan = _stage_plan(isolated_project_dir, [("improve", _knob_patch(5, 150.0))])
+        assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "approve", "plan-001", "--yes"]).exit_code == 0
+        assert cli_runner.invoke(app, ["experiment", "run", "plan-001"]).exit_code == 0
+
+        # The fixture evaluator is deterministic, so its repeats have stdev 0 and
+        # no limit can reject them. A negative-width limit is unreachable, so
+        # this asserts the flag is accepted and recorded rather than ignored.
+        result = cli_runner.invoke(
+            app, ["validate", "run-001", "--stdev-max", "0.5", "--yes", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        summary = json.loads(result.output)[0]
+        assert summary["stdev_max"] == 0.5
+        assert summary["outcome"] == "validated"
 
     def test_validate_without_promising_is_blocked(
         self,

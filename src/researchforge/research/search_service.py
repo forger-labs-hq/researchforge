@@ -60,6 +60,7 @@ def run_search(
     client: ArxivClient,
     select: int | None = None,
     force: bool = False,
+    min_score: float | None = None,
 ) -> SearchOutcome:
     """Run the full retrieval pipeline and persist the selected papers.
 
@@ -86,6 +87,10 @@ def run_search(
     deduped = deduplicate_entries(fetched)
     query_tokens = build_query_document(project.objective, scan, effective_queries)
     ranked = rank_candidates(deduped, query_tokens)
+
+    # Apply minimum relevance score filter before selection
+    if min_score is not None:
+        ranked = [(entry, score) for entry, score in ranked if score >= min_score]
 
     selection_size = select or settings.selected_papers
     selected = [_entry_to_paper(entry, score) for entry, score in ranked[:selection_size]]

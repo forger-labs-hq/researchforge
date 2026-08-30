@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import StrEnum
 from pathlib import Path
 
@@ -84,6 +84,7 @@ def run_evaluation(
     name_slug: str,
     test_command: str | None = None,
     extra_env: Mapping[str, str] | None = None,
+    on_phase: Callable[[str], None] | None = None,
 ) -> EvaluationOutcome:
     """Run one evaluation in `worktree`; artifacts land in `run_artifacts`."""
     stdout_path = run_artifacts / "stdout.log"
@@ -103,6 +104,7 @@ def run_evaluation(
             extra_env=extra_env,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
+            on_phase=on_phase,
         )
     return _run_docker(
         spec=spec,
@@ -118,6 +120,7 @@ def run_evaluation(
         extra_env=extra_env,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        on_phase=on_phase,
     )
 
 
@@ -135,9 +138,15 @@ def _run_venv(
     extra_env: Mapping[str, str] | None,
     stdout_path: Path,
     stderr_path: Path,
+    on_phase: Callable[[str], None] | None = None,
 ) -> EvaluationOutcome:
+    def _phase(msg: str) -> None:
+        if on_phase:
+            on_phase(msg)
+
     commands: list[str] = []
 
+    _phase("Creating virtual environment…")
     venv_python, outcome = venv_exec.create_venv(
         worktree, runner, timeout_seconds=timeout_seconds, log_dir=run_artifacts
     )
@@ -154,6 +163,7 @@ def _run_venv(
         env.update(extra_env)
 
     if spec.execution.setup_command:
+        _phase(f"Installing dependencies…  ({spec.execution.setup_command[:60]})")
         commands.append(spec.execution.setup_command)
         setup_outcome = runner.run(
             shell_argv(spec.execution.setup_command),
@@ -177,6 +187,7 @@ def _run_venv(
             )
 
     if test_command:
+        _phase(f"Running tests…  ({test_command[:60]})")
         commands.append(test_command)
         test_outcome = runner.run(
             shell_argv(test_command),
@@ -199,6 +210,7 @@ def _run_venv(
                 fingerprint=fingerprint,
             )
 
+    _phase(f"Running benchmark…  ({command[:60]})")
     commands.append(command)
     eval_outcome = runner.run(
         shell_argv(command),
@@ -262,9 +274,15 @@ def _run_docker(
     extra_env: Mapping[str, str] | None,
     stdout_path: Path,
     stderr_path: Path,
+    on_phase: Callable[[str], None] | None = None,
 ) -> EvaluationOutcome:
+    def _phase(msg: str) -> None:
+        if on_phase:
+            on_phase(msg)
+
     commands: list[str] = []
 
+    _phase("Building Docker image…")
     tag = f"researchforge-{name_slug}"
     build_outcome = docker_exec.build_image(
         worktree, tag, runner, timeout_seconds=timeout_seconds, log_dir=run_artifacts
@@ -289,9 +307,12 @@ def _run_docker(
     # Compose one in-container shell command: setup && tests && evaluation.
     parts: list[str] = []
     if spec.execution.setup_command:
+        _phase(f"Installing dependencies…  ({spec.execution.setup_command[:60]})")
         parts.append(spec.execution.setup_command)
     if test_command:
+        _phase(f"Running tests…  ({test_command[:60]})")
         parts.append(test_command)
+    _phase(f"Running benchmark…  ({command[:60]})")
     parts.append(command)
     container_command = " && ".join(parts)
     commands.extend(parts)

@@ -47,6 +47,20 @@ class PrimaryMetric(BaseModel):
 
     name: str = Field(min_length=1)
     direction: MetricDirection
+    target_value: float | None = Field(
+        default=None,
+        description=(
+            "The value that would satisfy the objective. `autorun` stops as soon as "
+            "the metric reaches it. None means 'improve as far as possible'."
+        ),
+    )
+
+    @field_validator("target_value")
+    @classmethod
+    def _finite_target(cls, v: float | None) -> float | None:
+        if v is not None and not math.isfinite(v):
+            raise ValueError("target_value must be finite")
+        return v
 
 
 class HardConstraint(BaseModel):
@@ -100,6 +114,14 @@ class ExecutionSection(BaseModel):
     cpu_limit: float = Field(default=2, gt=0)
     memory_mb: int = Field(default=4096, ge=256)
     max_experiments: int = Field(default=8, ge=1)  # consumed by Phase 1C
+    stall: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Stop the run after this many consecutive non-improvements. "
+            "None means run all approved experiments regardless."
+        ),
+    )
 
 
 class PermissionsSection(BaseModel):

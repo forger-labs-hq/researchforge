@@ -59,7 +59,13 @@ def resolve_git_ref(repo_root: Path, ref: str) -> str:
     return result.stdout.strip()
 
 
-def generate_contract(conn: sqlite3.Connection, *, output: Path, force: bool) -> Path:
+def generate_contract(
+    conn: sqlite3.Connection,
+    *,
+    output: Path,
+    force: bool,
+    target_value: float | None = None,
+) -> Path:
     project = get_project(conn)
     if project is None or project.mode is None or project.objective is None:
         raise ContractError("Define the project first: `researchforge project create`.")
@@ -69,7 +75,8 @@ def generate_contract(conn: sqlite3.Connection, *, output: Path, force: bool) ->
     if output.exists() and not force:
         raise ContractError(f"{output} already exists — use --force to overwrite.")
 
-    spec = build_draft_spec(project, scan)
+    repo_root = Path(project.repository.path) if project.repository.path else output.parent
+    spec = build_draft_spec(project, scan, repo_root=repo_root, target_value=target_value)
     output.write_text(render_contract_yaml(spec), encoding="utf-8")
     return output
 

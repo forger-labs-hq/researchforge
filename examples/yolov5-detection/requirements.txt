@@ -1,0 +1,4 @@
+# Ultralytics ships the YOLOv5u checkpoints and the COCO128 validation loop.
+# It pulls in torch, so the first isolated environment build is slow and needs
+# network access — hence `network.mode: enabled` in the contract.
+ultralytics>=8.3,<9
