@@ -145,7 +145,7 @@ Not the sketch above — this is the experiment graph from an actual `autorun`
 against a clone of `ultralytics/yolov5`, read straight out of that project's
 records:
 
-![Experiment graph from a real autorun: fifteen experiments branching from the frozen baseline, most rejected, one shipped](images/yolov5-graph.svg)
+![Experiment graph from a real autorun: fifteen experiments branching from the frozen baseline, most rejected, one shipped](assets/yolov5-graph.svg)
 
 **Fifteen experiments. One survived.** Eight were rejected for not improving the
 metric, two failed to execute and are kept on the record as failures, three were
