@@ -24,7 +24,7 @@
 
 </div>
 
-<!-- CHANGE 1: "into reproducible, traceable evidence. The agent proposes..." -->
+
 ResearchForge turns a research question — or an "improve my repository"
 goal — into reproducible, traceable evidence. The agent proposes; ResearchForge
 freezes, executes, measures, rejects, and validates. It finds relevant papers,
@@ -62,7 +62,7 @@ trust their milliseconds — that is what `baseline run --n-runs 3` is for.
 
 ## Architecture: Researcher and Lab Protocol
 
-<!-- CHANGE 2: add framing sentence before the table -->
+
 Claude/Cursor stays creative. ResearchForge keeps evaluation deterministic.
 Three parties with strict roles:
 
