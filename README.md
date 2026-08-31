@@ -24,11 +24,13 @@
 
 </div>
 
+<!-- CHANGE 1: "into reproducible, traceable evidence. The agent proposes..." -->
 ResearchForge turns a research question — or an "improve my repository"
-goal — into evidence. It finds relevant papers, generates testable hypotheses,
-benchmarks competing implementations against a frozen baseline in isolated
-local workspaces, and delivers the strongest supported result as a clean
-branch, an engineering report, or a research package.
+goal — into reproducible, traceable evidence. The agent proposes; ResearchForge
+freezes, executes, measures, rejects, and validates. It finds relevant papers,
+generates testable hypotheses, benchmarks competing implementations against a
+frozen baseline in isolated local workspaces, and delivers the strongest
+supported result as a clean branch, an engineering report, or a research package.
 
 Works with **Claude Code** (slash-command skills), **Cursor** (MDC rules),
 or **standalone** with any AI API key — install once for your whole machine.
@@ -60,6 +62,8 @@ trust their milliseconds — that is what `baseline run --n-runs 3` is for.
 
 ## Architecture: Researcher and Lab Protocol
 
+<!-- CHANGE 2: add framing sentence before the table -->
+Claude/Cursor stays creative. ResearchForge keeps evaluation deterministic.
 Three parties with strict roles:
 
 | Who | Does what |
@@ -587,9 +591,8 @@ researchforge validate run-001
 # "Validated" is only earned here — one run is never enough.
 
 # ── 12. Ship ─────────────────────────────────────────────────────────────────
-researchforge ship branch
-# Creates a clean local branch on the frozen baseline.
-# One commit, never pushed automatically — inspect with git log.
+researchforge ship branch             # clean LOCAL branch + engineering report —
+                                      # validated winner, traceable lineage, rejection history
 researchforge report build
 # Writes .researchforge/reports/engineering-report.md — full evidence chain.
 
