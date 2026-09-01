@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import json
-from contextlib import closing
+import sqlite3
+from contextlib import closing, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +20,7 @@ from researchforge.domain.experiment import (
     advance,
 )
 from researchforge.experiments.context_export import (
+    ExperimentContext,
     ExperimentContextError,
     build_experiment_context,
     write_experiment_context,
@@ -38,6 +41,36 @@ experiment_app = typer.Typer(
     name="experiment", no_args_is_help=True, help="Controlled experiments."
 )
 results_app = typer.Typer(name="results", no_args_is_help=True, help="Experiment results.")
+
+
+def _require_experiment(conn: sqlite3.Connection, experiment_id: str) -> None:
+    """Fail early on an unknown --parent, before any AI call or file is written."""
+    if get_experiment(conn, experiment_id) is None:
+        typer.echo(
+            f"Unknown experiment id: {experiment_id}. "
+            "See `researchforge experiment list` for what can be built on."
+        )
+        raise typer.Exit(code=1)
+
+
+def _handshake_parent_instruction(
+    context: ExperimentContext, parent_experiment_id: str
+) -> ExperimentContext:
+    """Tell the plan's author to declare the parent it is building on.
+
+    The autorun path sets `parent:` itself after the model answers. A plan
+    written in an editor is imported exactly as typed, so here it has to be
+    asked for.
+    """
+    instructed = copy.deepcopy(context)
+    instructed.instructions.append(
+        f"BUILDING ON {parent_experiment_id}: set `parent: {parent_experiment_id}` on "
+        "every entry in plan.yaml. The REPOSITORY section already shows the files as "
+        f"{parent_experiment_id} leaves them, so write the change against those "
+        "contents: do not re-apply that experiment's own change, and do not expect "
+        "the baseline's values."
+    )
+    return instructed
 
 
 @experiment_app.command("plan")
@@ -69,6 +102,13 @@ def plan_command(
         str | None,
         typer.Option("--model", "-m", help="Override model name."),
     ] = None,
+    parent: Annotated[
+        str | None,
+        typer.Option(
+            "--parent",
+            help="Build on a measured experiment (e.g. exp-008) instead of the baseline.",
+        ),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Export the experiment-planning context for a hypothesis.
@@ -81,6 +121,12 @@ def plan_command(
       export ANTHROPIC_API_KEY=sk-ant-...
       researchforge experiment plan --all --synthesize
       researchforge experiment plan hyp-001 --synthesize
+
+    --parent compounds on an earlier result: the exported files are the ones that
+    experiment leaves behind, so the change is written against what it already
+    won rather than against the baseline.
+
+      researchforge experiment plan hyp-002 --parent exp-008
     """
     # ── --all mode ────────────────────────────────────────────────────────────
     if all_hypotheses:
@@ -101,12 +147,14 @@ def plan_command(
                     f"  Found {len(pending)} pending hypothesis(es): "
                     f"{', '.join(h.hypothesis_id for h in pending)}"
                 )
+            if parent is not None:
+                _require_experiment(conn, parent)
             plan_ids = plan_all_hypotheses(
                 conn,
                 pending,
                 provider,
                 model,
-                parent_experiment_id=None,
+                parent_experiment_id=parent,
                 on_progress=None if json_output else lambda m: typer.echo(f"  {m}"),
             )
 
@@ -125,18 +173,32 @@ def plan_command(
         raise typer.Exit(code=1)
 
     with closing(open_project_db()) as conn:
+        if parent is not None:
+            _require_experiment(conn, parent)
         try:
-            context = build_experiment_context(conn, hypothesis_id)
+            context = build_experiment_context(conn, hypothesis_id, parent_experiment_id=parent)
         except ExperimentContextError as exc:
             typer.echo(str(exc))
             raise typer.Exit(code=1) from None
 
     if not synthesize:
+        # Nothing forces `parent:` on the handshake path — the plan arrives from
+        # an editor and imports as written. So the instruction has to ask for it,
+        # or the patch would be written against the parent's files and then
+        # applied to the baseline.
+        if parent is not None:
+            context = _handshake_parent_instruction(context, parent)
         if json_output:
             echo_model(context)
             return
         path = write_experiment_context(context)
         typer.echo(f"Experiment context written to {path}")
+        if parent is not None:
+            typer.echo(
+                f"Building on {parent}: the REPOSITORY section shows the files as "
+                f"{parent} leaves them, and every entry in plan.yaml must declare "
+                f"parent: {parent}."
+            )
         typer.echo("Options:")
         typer.echo(
             "  A) Auto-generate plan with AI:  researchforge experiment plan hyp-001 "
@@ -162,10 +224,13 @@ def plan_command(
         raise typer.Exit(code=1) from None
 
     from researchforge.ai.plan_gen import planning_phase_label
+    from researchforge.autorun.engine import _compound_instruction, force_plan_parent
     from researchforge.utils.progress import LiveProgress
 
     # Export context first
     write_experiment_context(context)
+    if parent is not None:
+        context = _compound_instruction(context, parent)
 
     try:
         with LiveProgress(
@@ -177,6 +242,11 @@ def plan_command(
     except ValueError as exc:
         typer.echo(f"Plan generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from None
+
+    # The lineage is the engine's decision, not the model's — same rule autorun
+    # applies when it compounds.
+    if parent is not None:
+        plan_yaml = force_plan_parent(plan_yaml, parent)
 
     # Write plan.yaml
     from pathlib import Path as _Path
@@ -239,7 +309,33 @@ def import_command(
                 f"({runnable} runnable, {rejected} rejected). "
                 f"Next: researchforge experiment approve {plan.plan_id}"
             )
+            _record_handshake_usage(conn, file)
     echo_import_result(result.errors, result.warnings, summary, json_output)
+
+
+def _record_handshake_usage(conn: sqlite3.Connection, plan_file: Path) -> None:
+    """Note the context volume of an IDE-authored plan, as an estimate.
+
+    This is the only place the loop can account for a round it did not pay for
+    itself: the tokens were spent in the user's IDE session, and all that is
+    observable here is how much context went out and how much came back.
+    """
+    from researchforge.config.paths import experiments_dir
+    from researchforge.experiments.context_export import (
+        CONTEXT_FILENAME,
+        PATCHES_DIR_NAME,
+    )
+    from researchforge.experiments.handshake_usage import size_handshake
+    from researchforge.storage.ai_call_repository import insert_ai_calls
+    from researchforge.storage.project_repository import get_project
+
+    staging = experiments_dir()
+    call = size_handshake(staging / CONTEXT_FILENAME, plan_file, staging / PATCHES_DIR_NAME)
+    project = get_project(conn)
+    if call is None or project is None:
+        return
+    with suppress(sqlite3.Error):
+        insert_ai_calls(conn, project.id, [call])
 
 
 def _print_experiment(experiment: Experiment) -> None:

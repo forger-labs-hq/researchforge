@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 from researchforge.research.context_export import SynthesisContext
 
 # ---------------------------------------------------------------------------
@@ -201,7 +202,8 @@ def synthesize(
     been round-tripped through PyYAML to verify they are valid.
     """
     user_prompt = _build_user_prompt(ctx)
-    raw = provider.generate(_SYSTEM, user_prompt, max_tokens=16384)
+    with purpose("synthesis"):
+        raw = provider.generate(_SYSTEM, user_prompt, max_tokens=16384)
 
     landscape_dict, hypotheses_dict = parse_synthesis_response(raw)
 

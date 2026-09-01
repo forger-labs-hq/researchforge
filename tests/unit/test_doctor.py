@@ -107,12 +107,12 @@ def test_check_claude_skills_states(isolated_project_dir: Path) -> None:
 
     install_skills()
     result = check_claude_skills()
-    assert result.detail == "12/12 installed"
+    assert result.detail == "13/13 installed"
 
     skill = isolated_project_dir / ".claude" / "skills" / "researchforge-run" / "SKILL.md"
     skill.write_text("edited\n", encoding="utf-8")
     result = check_claude_skills()
-    assert result.detail == "11/12 installed, 1 locally modified"
+    assert result.detail == "12/13 installed, 1 locally modified"
 
 
 def test_doctor_cli_exits_zero_when_only_optional_tools_missing(

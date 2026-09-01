@@ -2,9 +2,9 @@
 
 > This document describes the codebase at the **Phase 1 open-source beta**.
 > See [demo.md](demo.md) to watch it run, [research-mode.md](research-mode.md)
-> for the research workflow, [experiment-mode.md](experiment-mode.md) for the
-> contract → baseline → funnel → shipping workflow, and
-> [claude-mode.md](claude-mode.md) for driving everything from Claude Code.
+> for the research workflow, and [experiment-mode.md](experiment-mode.md) for the
+> contract → baseline → funnel → shipping workflow, including
+> [driving the loop from Claude Code or Cursor](experiment-mode.md#driving-the-loop-from-claude-code-or-cursor).
 > The security model is in the README under
 > [Security & Isolation](../README.md#security--isolation--what-runs-where).
 

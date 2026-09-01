@@ -203,6 +203,58 @@ def _card(key: str, value: str, detail: str = "") -> str:
     )
 
 
+def _economics_cards(state: ProjectState) -> list[str]:
+    """Compute and model spend, summarised.
+
+    The overview answers "where does this project stand", and what it has cost
+    to get here is part of that. The full breakdown — by stage, by outcome, and
+    what never had to run — stays on the dashboard tab.
+    """
+    from researchforge.config.settings import load_settings
+    from researchforge.reporting.economics import compute_economics, humanize_seconds
+
+    settings = load_settings()
+    economics = compute_economics(
+        state.experiments,
+        state.executions,
+        [state.baseline] if state.baseline is not None else [],
+        None,
+        calls=state.ai_calls,
+        prices=settings.model_prices,
+        usd_per_hour=settings.local_compute_usd_per_hour,
+    )
+
+    cards: list[str] = []
+    total = economics.stages.total
+    if total > 0:
+        detail = f"{humanize_seconds(economics.stages.full)} in full benchmarks"
+        avoided = economics.avoided.seconds
+        if avoided is not None:
+            detail += f" · {humanize_seconds(avoided)} avoided"
+        cards.append(_card("compute", escape(humanize_seconds(total)), escape(detail)))
+
+    spend = economics.tokens
+    if spend.total_tokens:
+        # An unpriced model contributes no dollars, so saying so beats a total
+        # that looks complete and is not.
+        if spend.usd > 0 and spend.fully_priced:
+            detail = f"{spend.calls} call(s) · ${spend.usd:,.2f}"
+        elif not spend.fully_priced:
+            detail = f"{spend.calls} call(s) · some models unpriced"
+        else:
+            detail = f"{spend.calls} call(s)"
+        cards.append(_card("tokens", f"{spend.total_tokens:,}", escape(detail)))
+    if spend.has_estimates:
+        cards.append(
+            _card(
+                "tokens (IDE)",
+                f"~{spend.estimated_tokens:,}",
+                escape(f"{spend.estimated_calls} planning exchange(s) · sized, not metered"),
+            )
+        )
+    return cards
+
+
 def overview_page(state: ProjectState) -> str:
     project = state.project
     status_counts: dict[str, int] = {}
@@ -232,6 +284,7 @@ def overview_page(state: ProjectState) -> str:
                 escape(state.baseline.execution_mode.value),
             )
         )
+    cards.extend(_economics_cards(state))
     body = [
         f"<h1>{escape(project.name)}</h1>",
         "<p class='sub'>Live view — refreshes automatically; everything is read from "

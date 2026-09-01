@@ -92,6 +92,52 @@ rejected experiment is still recorded rather than quietly dropped. See
 [the autorun section in the README](../README.md#the-autonomous-loop) for the
 flags.
 
+## Driving the loop from Claude Code or Cursor
+
+`autorun` needs an AI provider to write plans. Without a key — because your
+policy forbids one, or because your budget is a Claude Code subscription rather
+than an API bill — the IDE agent can drive the same loop by hand, and the engine
+still holds the search.
+
+Ask it where to go next. This spends nothing: no AI call, nothing runs.
+
+```bash
+researchforge autorun --dry-run --json
+```
+
+It answers with the node the loop would expand, the hypotheses it would try
+there in ranked order, and the command to take that step:
+
+```bash
+researchforge experiment plan hyp-002 --parent exp-008
+```
+
+`--parent` is what makes this compound. The exported context's `repository`
+section shows the files **as `exp-008` leaves them**, with `applied` naming the
+experiments already baked into what the author is reading — so the change is
+written against what that experiment already won, not against the baseline.
+
+Two things worth knowing on this path. Every entry in a hand-written `plan.yaml`
+must declare `parent: exp-008`; the exported instructions ask for it, but nothing
+can add it after the fact the way `--synthesize` and `autorun` do, and a patch
+written against the parent but imported without one will be applied to the
+baseline and fail. And the preview reads the same flags the real loop would, so
+`--dry-run --explore 0.5` answers with the policy that setting implies.
+
+Two fields on the answer are worth reading rather than skipping past.
+`retreat: true` means the only moves left sit on branches that gained nothing —
+running one measures an idea *without* the gains already banked, which is an
+ablation rather than progress. `needs_resynthesis: true` means every hypothesis
+has been tried everywhere it can apply, and only new ideas can continue:
+
+```bash
+researchforge research synthesize --from-results
+```
+
+`researchforge init --claude` and `init --cursor` install a
+`researchforge-autorun` skill (or `@researchforge-autorun` rule) that teaches
+this cycle, so the agent follows it without being talked through it each time.
+
 ## Experiments form a DAG, not a chain
 
 An experiment declares `parent_experiment_ids`. With no parents it is measured

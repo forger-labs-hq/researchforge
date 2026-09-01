@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 from researchforge.domain.project import Project
 from researchforge.domain.repo_scan import RepoScan
 
@@ -127,7 +128,8 @@ def generate_eval_files(
     Raises ValueError with a descriptive message if parsing fails.
     """
     user_prompt = _build_prompt(project, scan)
-    raw = provider.generate(_SYSTEM, user_prompt, max_tokens=8192)
+    with purpose("evaluation"):
+        raw = provider.generate(_SYSTEM, user_prompt, max_tokens=8192)
 
     eval_script = _extract_tag(raw, "eval_script")
     config = _extract_tag(raw, "config")

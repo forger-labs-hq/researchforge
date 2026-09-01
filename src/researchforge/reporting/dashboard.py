@@ -31,6 +31,7 @@ from researchforge.execution.ranking import (
     signed_improvement,
 )
 from researchforge.execution.validation import summarize_validation
+from researchforge.reporting.economics import Economics, build_economics, humanize_seconds
 from researchforge.reporting.svg_charts import (
     Bar,
     GraphNode,
@@ -78,6 +79,17 @@ h2 { font-size: 1rem; font-weight: 600; margin: 36px 0 10px; padding-left: 10px;
 .card .d { color: var(--fg-muted); font-size: 0.78rem; margin-top: 3px; }
 .card.stat { border-top: 2px solid var(--brand); }
 .card.stat .v { font-size: 1.8rem; letter-spacing: -0.02em; color: var(--brand); }
+.card.econ { flex: 1 1 240px; }
+.card h3 { font-size: 0.78rem; font-weight: 600; margin: 0 0 8px; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.card table { font-size: 0.8rem; }
+.card td { padding: 4px 0; border-bottom: none; }
+.card td:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+.card td:nth-child(3) { text-align: right; color: var(--fg-muted); width: 3.2em; }
+.card .sub { margin: 0; font-size: 0.8rem; }
+.big { font-size: 1.7rem; font-weight: 600; margin: 0 0 4px;
+  letter-spacing: -0.02em; color: var(--brand); }
+h3 { font-size: 0.92rem; font-weight: 600; margin: 22px 0 6px; }
 svg { width: 100%; height: auto; background: var(--card); border-radius: 8px;
   padding: 8px; border: 1px solid var(--grid); }
 table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
@@ -424,6 +436,8 @@ def build_dashboard(
             "rejected on a constraint, or failed later).</p>"
         )
 
+    sections.append(_economics_section(build_economics(conn), primary))
+
     if run is None:
         sections.append(
             "<p class='empty'>No experiment runs recorded yet — run "
@@ -615,6 +629,169 @@ def _spread_section(
         "<h2>Validation spread — repeated runs, not one-offs</h2>"
         f"{chart}<p class='sub'>Filled dots: validation attempts. Hollow dot: the original "
         "full-benchmark value. Tick: mean.</p>"
+    )
+
+
+def _economics_section(economics: Economics, primary: str) -> str:
+    """Where the compute went, and which runs never had to happen.
+
+    Deliberately makes no claim about what a person would have spent instead:
+    the avoided-work figure is a count of skipped runs times this project's own
+    measured cost per run, and both halves are shown so the reader can check the
+    multiplication rather than take it on faith.
+    """
+    stages = economics.stages
+    if stages.total <= 0:
+        return ""
+
+    parts = [
+        ("baseline", stages.baseline),
+        ("screening", stages.screening),
+        ("full benchmarks", stages.full),
+        ("validation", stages.validation),
+    ]
+    used = "".join(
+        f"<tr><td>{escape(label)}</td><td>{escape(humanize_seconds(value))}</td>"
+        f"<td>{value / stages.total * 100:.0f}%</td></tr>"
+        for label, value in parts
+        if value > 0
+    )
+    # Percentages here are of experiment compute, not of the total: the baseline
+    # has no outcome, so sharing the "Compute used" denominator would leave these
+    # rows summing to less than 100% in a table that looks like it should.
+    experiment_total = sum(economics.by_outcome.values())
+    by_outcome = "".join(
+        f"<tr><td>{escape(outcome)}</td><td>{escape(humanize_seconds(value))}</td>"
+        f"<td>{value / experiment_total * 100:.0f}%</td></tr>"
+        for outcome, value in economics.by_outcome.items()
+        if experiment_total > 0
+    )
+
+    avoided = economics.avoided
+    if avoided.runs == 0:
+        avoided_html = (
+            "<p class='sub'>Nothing was screened out or stopped early, so every "
+            "experiment cost a full benchmark.</p>"
+        )
+    elif avoided.seconds is None:
+        avoided_html = (
+            f"<p class='sub'>{avoided.runs} run(s) were skipped, but no full benchmark "
+            "has completed yet — there is no measured cost per run to price them at.</p>"
+        )
+    else:
+        avoided_html = (
+            f"<p class='big'>{escape(humanize_seconds(avoided.seconds))}</p>"
+            f"<p class='sub'>{avoided.runs} full benchmark(s) never ran — "
+            f"{avoided.screened_out} screened out, {avoided.cancelled} stopped by the "
+            f"stall rule — priced at this project's own average full benchmark of "
+            f"{escape(humanize_seconds(avoided.mean_full_seconds))}.</p>"
+        )
+
+    spend = economics.tokens
+    estimate_note = ""
+    if spend.has_estimates:
+        estimate_note = (
+            f"<p class='sub'>Plus about {spend.estimated_tokens:,} token(s) across "
+            f"{spend.estimated_calls} planning exchange(s) driven from an IDE. Those "
+            "were spent in your editor's session, so they are sized from the context "
+            "handed over rather than metered, and are not priced.</p>"
+        )
+    if spend.calls:
+        by_purpose = "".join(
+            f"<tr><td>{escape(label)}</td><td>{tokens:,}</td></tr>"
+            for label, tokens in spend.by_purpose.items()
+        )
+        if spend.total_tokens and spend.usd > 0:
+            headline = f"<p class='big'>${spend.usd:,.2f}</p>"
+        else:
+            headline = f"<p class='big'>{spend.total_tokens:,}</p>"
+        caveat = ""
+        if not spend.fully_priced:
+            caveat = (
+                "<p class='sub'>No rate configured for "
+                f"{escape(', '.join(spend.unpriced_models))}, so those tokens are "
+                "counted but not priced — the dollar figure is a floor.</p>"
+            )
+        tokens_html = (
+            "<div class='card econ'><h3>Model calls</h3>"
+            f"{headline}"
+            f"<p class='sub'>{spend.calls:,} call(s) · {spend.input_tokens:,} in / "
+            f"{spend.output_tokens:,} out</p>"
+            f"<table><tbody>{by_purpose}</tbody></table>{caveat}{estimate_note}</div>"
+        )
+    elif spend.has_estimates:
+        tokens_html = (
+            "<div class='card econ'><h3>Model calls</h3>"
+            f"<p class='big'>~{spend.estimated_tokens:,}</p>"
+            f"<p class='sub'>{spend.estimated_calls} planning exchange(s) driven from "
+            "an IDE. The tokens were spent in your editor's session, so this is sized "
+            "from the context handed over and what came back — an estimate, not a "
+            "metered count, and not priced.</p></div>"
+        )
+    else:
+        # An empty card that explains itself, rather than no card at all: a
+        # reader looking for token spend should learn why there is none instead
+        # of wondering whether the feature is broken.
+        tokens_html = (
+            "<div class='card econ'><h3>Model calls</h3><p class='big'>—</p>"
+            "<p class='sub'>No model calls recorded for this project. Usage is "
+            "captured as calls happen, so runs made before token accounting "
+            "existed have none to report, and a loop driven from an IDE spends "
+            "its tokens there rather than here.</p></div>"
+        )
+
+    if economics.compute_usd is not None:
+        compute_note = (
+            f"<p class='sub'>Compute priced at the configured hourly rate: "
+            f"${economics.compute_usd:,.2f} for {escape(humanize_seconds(stages.total))}."
+            "</p>"
+        )
+    else:
+        compute_note = (
+            "<p class='sub'>Compute is reported in hours, not dollars: what an hour "
+            "of this machine costs is specific to your setup. Set "
+            "<code>local_compute_usd_per_hour</code> in "
+            "<code>.researchforge/config.json</code> to convert it.</p>"
+        )
+
+    record = economics.record
+    caught = economics.caught
+    kept_note = (
+        f"{record.experiments} experiment(s) recorded, {record.with_lineage} building on "
+        f"an earlier result. {record.kept} kept, {record.rejected} rejected, "
+        f"{record.failed} failed, {record.cancelled} cancelled — the ones that did not "
+        "work are kept too, so the same idea is not retried by the next person."
+    )
+    caught_rows = []
+    if caught.constraint_violations:
+        caught_rows.append(
+            f"<li><strong>{len(caught.constraint_violations)}</strong> change(s) broke a "
+            "hard limit and were stopped by it, whatever they did to "
+            f"{escape(primary)}: {escape(', '.join(caught.constraint_violations))}.</li>"
+        )
+    if caught.no_ops:
+        caught_rows.append(
+            f"<li><strong>{len(caught.no_ops)}</strong> change(s) measured exactly what "
+            "they inherited, contributing nothing of their own: "
+            f"{escape(', '.join(caught.no_ops))}.</li>"
+        )
+    caught_html = (
+        f"<h3>Caught before it shipped</h3><ul>{''.join(caught_rows)}</ul>" if caught_rows else ""
+    )
+
+    return (
+        "<h2>Time economics</h2>"
+        "<div class='cards'>"
+        f"<div class='card econ'><h3>Compute used — {escape(humanize_seconds(stages.total))}"
+        f"</h3><table><tbody>{used}</tbody></table></div>"
+        f"<div class='card econ'><h3>By outcome — {escape(humanize_seconds(experiment_total))}"
+        f" of experiments</h3><table><tbody>{by_outcome}</tbody></table></div>"
+        f"<div class='card econ'><h3>Work avoided</h3>{avoided_html}</div>"
+        f"{tokens_html}"
+        "</div>"
+        f"{compute_note}"
+        f"<h3>The record</h3><p class='sub'>{escape(kept_note)}</p>"
+        f"{caught_html}"
     )
 
 

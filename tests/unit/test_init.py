@@ -57,3 +57,66 @@ def test_init_json_output(cli_runner: CliRunner, isolated_project_dir: Path) -> 
     payload = json.loads(result.output)
     assert payload["name"] == isolated_project_dir.name
     assert payload["status"] == "initialized"
+
+
+class TestInitCursor:
+    """`--cursor` installs the workflow rules, not only the gateway.
+
+    The gateway alone tells Cursor the rules exist by name; without the rules
+    themselves those references resolve to nothing.
+    """
+
+    def test_the_workflow_rules_land_beside_the_gateway(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        from researchforge.cursor.installer import list_packaged_rules
+
+        result = cli_runner.invoke(app, ["init", "--cursor"])
+
+        assert result.exit_code == 0, result.output
+        rules_dir = isolated_project_dir / ".cursor" / "rules"
+        assert (rules_dir / "researchforge.mdc").is_file()
+        for name in list_packaged_rules():
+            assert (rules_dir / f"{name}.mdc").is_file(), name
+
+    def test_the_loop_rule_is_among_them(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        cli_runner.invoke(app, ["init", "--cursor"])
+
+        rule = isolated_project_dir / ".cursor" / "rules" / "researchforge-autorun.mdc"
+        assert rule.is_file()
+
+    def test_the_gateway_lists_every_installed_rule(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        """A rule Cursor cannot be pointed at may as well not be installed."""
+        from researchforge.cursor.installer import list_packaged_rules
+
+        cli_runner.invoke(app, ["init", "--cursor"])
+
+        gateway = (isolated_project_dir / ".cursor" / "rules" / "researchforge.mdc").read_text(
+            encoding="utf-8"
+        )
+        for name in list_packaged_rules():
+            assert f"@{name}" in gateway, name
+
+    def test_json_reports_what_was_installed(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        result = cli_runner.invoke(app, ["init", "--cursor", "--json"])
+
+        payload = json.loads(result.output)
+        assert payload["cursor_gateway"]["action"] == "installed"
+        installed = {r["rule"] for r in payload["cursor_rules"]["results"]}
+        assert "researchforge-autorun" in installed
+
+    def test_reinstalling_changes_nothing(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        cli_runner.invoke(app, ["init", "--cursor"])
+        result = cli_runner.invoke(app, ["init", "--cursor", "--json"])
+
+        payload = json.loads(result.output)
+        assert payload["cursor_gateway"]["action"] == "unchanged"
+        assert all(r["action"] == "unchanged" for r in payload["cursor_rules"]["results"])

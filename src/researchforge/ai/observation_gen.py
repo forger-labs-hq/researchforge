@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 
 MAX_LOG_CHARS = 8000
 MAX_OBSERVATION_CHARS = 600
@@ -98,7 +99,8 @@ def generate_observation(request: ObservationRequest, provider: AiProvider) -> s
     if not request.log_tail.strip():
         return None
 
-    raw = provider.generate(_SYSTEM, build_prompt(request), max_tokens=1024)
+    with purpose("observation"):
+        raw = provider.generate(_SYSTEM, build_prompt(request), max_tokens=1024)
     match = re.search(r"<observation>(.*?)</observation>", raw, re.DOTALL)
     text = (match.group(1) if match else raw).strip()
     collapsed = " ".join(text.split())

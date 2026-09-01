@@ -427,10 +427,17 @@ others afterwards.
 | **A** | The whole thing, unattended, until it stops improving | `researchforge autorun` |
 | **B** | Every hypothesis planned now, run them yourself | `researchforge experiment plan --all --synthesize` |
 | **C** | One hypothesis at a time, inspecting as you go | `researchforge experiment plan hyp-001 --synthesize` |
+| **D** | The loop, but your IDE writes the plans (no API key) | `researchforge autorun --dry-run` |
 
-All three need an API key. All three keep the same gates: the contract was
-already approved in step 6, and nothing runs against your repo without an
-approval on record.
+All three keep the same gates: the contract was already approved in step 6, and
+nothing runs against your repo without an approval on record.
+
+All three also need something that can write a patch. An API key is the simple
+answer, but not the only one — if your intelligence is a Claude Code or Cursor
+subscription rather than a key, see
+[**D — driving the loop from your IDE**](#d--driving-the-loop-from-your-ide),
+where the engine still chooses where to search and the agent only writes the
+change.
 
 #### A — the autonomous loop (what most people mean by "run it")
 
@@ -484,6 +491,7 @@ from results; A and B test the hypotheses you already have and stop.
 | `-p/--provider TEXT` | auto-detected | `anthropic` \| `google` \| `openai` |
 | `-m/--model TEXT` | provider default | Override the model name |
 | `--resume` | — | Continue the interrupted loop recorded in `.researchforge/autorun.json` |
+| `--dry-run` | off | Print the move the loop would make next and exit. No AI call, nothing runs |
 | `-y/--yes` | off | Unattended — skip the first-batch approval prompt |
 | `--json` | off | Machine-readable output |
 
@@ -577,6 +585,42 @@ researchforge run .researchforge/experiments/plan.yaml
 # Set stall in researchforge.yaml: execution.stall: 3
 ```
 
+#### D — driving the loop from your IDE
+
+For when the intelligence is a Claude Code or Cursor subscription rather than an
+API key. The agent writes the plans; ResearchForge still decides where to search,
+validates what arrives, runs the benchmark, and records the result.
+
+Ask the engine where to go next. This spends nothing — no AI call, nothing runs:
+
+```bash
+researchforge autorun --dry-run --json
+```
+
+It answers with the node the loop would expand, the hypotheses it would try
+there in ranked order, and the command that takes that step:
+
+```bash
+researchforge experiment plan hyp-002 --parent exp-008
+```
+
+`--parent` is what makes this compound rather than restart. The exported context
+shows the files **as `exp-008` leaves them**, so the change is written against
+what that experiment already won. Every entry in a hand-written `plan.yaml` must
+then declare `parent: exp-008` — the exported instructions ask for it, and a
+patch written against a parent but imported without one will be applied to the
+baseline and fail.
+
+Then import, approve, run, read the result, and ask for the next move again.
+Two fields on the answer are worth reading: `retreat: true` means the only moves
+left sit on branches that gained nothing, and `needs_resynthesis: true` means
+every hypothesis has been tried everywhere it can apply.
+
+`researchforge init --claude` and `init --cursor` install a
+`researchforge-autorun` skill that teaches the agent this cycle, so you can just
+say "keep going" instead of walking it through each round. Full detail in
+[docs/experiment-mode.md](docs/experiment-mode.md#driving-the-loop-from-claude-code-or-cursor).
+
 ### The rest is the same whichever you picked
 
 ```bash
@@ -618,8 +662,9 @@ researchforge ship pr   # optional: push + open a DRAFT PR (requires gh CLI)
 Everything is local; nothing outside your repository is ever created. To
 redefine just the objective on existing data:
 `researchforge project create --force-update`.
-[docs/claude-mode.md](docs/claude-mode.md) explains exactly what the Claude
-skills do and cannot do.
+The skills are convenience, not authority: what they may and may not do is
+enforced by the engine, described in
+[Security & Isolation](#security--isolation--what-runs-where).
 
 ---
 
@@ -932,6 +977,37 @@ variants are shown in context. Nodes link to full experiment details. As the
 autorun loop matures, the graph shows multi-round structures with backtracking
 and compound experiments.
 
+A **time economics** section accounts for what the run cost:
+
+- **Compute used**, split by stage and by how each experiment ended — so what
+  the failures cost is visible, not just what the winner gained.
+- **Work avoided** — full benchmarks that never ran because screening or the
+  stall rule stopped them first, priced at *your project's own* measured average
+  full benchmark. Both the count and the average are shown, so you can check the
+  arithmetic rather than take the product on faith.
+- **Model calls** — tokens in and out, grouped by what the loop was doing
+  (planning, synthesis, observation), converted to dollars at per-model rates.
+  When the loop is driven from Claude Code or Cursor instead of an API key, the
+  tokens are spent in your editor's session where ResearchForge cannot meter
+  them; it records the size of each planning exchange instead, marked as an
+  estimate and never priced.
+
+The hub shows compute time and token spend on every project card, so you can see
+at a glance which project has actually been running rather than just thinking.
+
+Rates live in `.researchforge/config.json` under `model_prices` (dollars per
+million tokens, matched by model-name prefix) with defaults you can override to
+match your negotiated pricing. Token counts are always shown next to any dollar
+figure, and a model with no configured rate is **named** rather than billed at
+zero — a missing rate should be visible, not silently flattering. Benchmark
+compute is reported in hours unless you set `local_compute_usd_per_hour`, since
+what an hour of your machine costs is yours to know: a laptop you already own
+has no marginal cost, a rented GPU has a number on an invoice.
+
+There is deliberately no "this would have taken a human N hours" figure. That
+number cannot be verified, and one unfalsifiable claim discredits the measured
+ones standing next to it.
+
 ```bash
 pip install "researchforge[serve]"   # adds the live web monitor
 researchforge serve --background     # live monitor for THIS project (URL printed)
@@ -1007,7 +1083,6 @@ Print all file locations with `researchforge paths`.
 ## More documentation
 
 - [docs/demo.md](docs/demo.md) — the launch demo, step by step
-- [docs/claude-mode.md](docs/claude-mode.md) — working from Claude Code (skills)
 - [docs/research-mode.md](docs/research-mode.md) — the research journey (CLI)
 - [docs/experiment-mode.md](docs/experiment-mode.md) — contract, funnel, shipping (CLI)
 - [docs/architecture.md](docs/architecture.md) — code layout

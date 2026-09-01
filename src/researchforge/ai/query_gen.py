@@ -23,6 +23,7 @@ import json
 import re
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 from researchforge.config.settings import ResearchSettings
 from researchforge.domain.repo_scan import RepoScan
 
@@ -75,7 +76,8 @@ def generate_queries_with_ai(
     )
 
     try:
-        raw = provider.generate(_SYSTEM, user_prompt, max_tokens=512)
+        with purpose("queries"):
+            raw = provider.generate(_SYSTEM, user_prompt, max_tokens=512)
         # Extract JSON array from response (model may wrap it in markdown)
         queries = _parse_json_array(raw)
         # Clamp to configured bounds

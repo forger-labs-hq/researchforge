@@ -62,6 +62,7 @@ Reference these with `@rule-name` for detailed guidance on each stage:
 | `@researchforge-baseline` | drafting the contract and running the baseline |
 | `@researchforge-plan` | designing experiment variants and patches |
 | `@researchforge-run` | executing the experiment funnel |
+| `@researchforge-autorun` | driving the loop round after round |
 | `@researchforge-results` | reading and explaining results |
 | `@researchforge-validate` | validating finalists with repeated runs |
 | `@researchforge-ship` | shipping the winning result as a branch or PR |

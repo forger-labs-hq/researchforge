@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.3.0 — What it costs, and running it from your editor (2026-09-01)
+
+Two gaps 0.2.0 left open: the loop needed an API key even when you were already
+paying for one inside your editor, and nothing anywhere said what a run cost.
+
+### The loop without an API key
+
+- **`autorun --dry-run`** answers "where would you go next?" — which node the
+  frontier would expand and which hypotheses it ranked there — without planning,
+  running, or calling a provider. An agent driving the loop by hand gets
+  ResearchForge's search instead of re-deriving one by eye from a results table.
+  `--json` for programmatic use.
+- **`experiment plan --parent exp-NNN`** compounds onto a measured winner from
+  the handshake path: the exported repository files are the ones that experiment
+  leaves behind, so the change is written against what it already won. Unknown
+  ids fail before any AI call or file write.
+- **Provider resolution is lazy** in `plan_all_hypotheses`. A round with nothing
+  to plan no longer demands a key it was never going to use, which is what
+  blocked keyless execution-only rounds.
+- **`researchforge-autorun`** skill and Cursor rule drive the loop from the
+  editor: dry-run for the next move, plan and import it, run it, repeat.
+- **`init --cursor` installs the workflow rules**, not only the gateway —
+  matching what `--claude` has always done.
+
+### What a run costs
+
+- **Time economics** on the dashboard: compute split by stage and *by how each
+  experiment ended*, so what the failures cost is visible rather than only what
+  the winner gained; how many full benchmarks never ran because screening or the
+  stall rule stopped them first; and which changes a hard limit caught.
+- **Work avoided is shown as its arithmetic** — skipped runs times this
+  project's own measured average full benchmark, with both halves on screen. A
+  project with no completed benchmark to average reports no figure rather than
+  zero.
+- **No counterfactual claims.** There is deliberately no "this would have taken
+  a human N hours": that number cannot be checked, and one unfalsifiable claim
+  discredits the measured ones next to it. A test fails the build if the phrase
+  reappears in the dashboard.
+- **The hub shows compute and token spend per project**, so you can see which
+  project has been running rather than only thinking; the monitor's overview tab
+  carries the same summary, and the full breakdown stays on its dashboard tab.
+
+### Token accounting
+
+- **Every provider now reports usage.** Anthropic, Gemini and OpenAI all
+  returned token counts that were being discarded on the line that extracted the
+  text. Providers file them into a context-local ledger rather than changing
+  `generate()`'s signature, so callers that want the numbers opt in and the rest
+  are unaffected. Usage is recorded even when a call raises — a request that
+  failed after the prompt was read still cost money.
+- **Calls are attributed to what asked for them** — planning, synthesis,
+  observation, evaluation, merge, queries, dockerfile — and stored per project.
+- **Prices live in `.researchforge/config.json`** under `model_prices`, dollars
+  per million tokens matched by longest model-name prefix, so `gpt-4o-mini` is
+  not billed at `gpt-4o`'s rate and a dated release is priced by its family.
+  Defaults ship for common models and are overridable for negotiated rates.
+- **A model with no rate is named, not billed at zero.** The dashboard says the
+  dollar figure is a floor and lists the unpriced models; the hub omits the
+  dollar pill entirely. A zero meaning "unknown" reads as "free".
+- **Benchmark compute converts to dollars only if you say what an hour costs**
+  (`local_compute_usd_per_hour`), since an owned laptop has no marginal hourly
+  cost and a rented GPU has an invoice.
+- **IDE-driven planning is sized, not metered.** When Claude Code or Cursor
+  makes the call, ResearchForge never sees the response — so it records the size
+  of the exchange it *can* see: context handed over, plan and patches returned.
+  These are stored flagged as estimates, kept out of the metered total, never
+  priced, and rendered with a tilde everywhere they appear.
+
+**Compatibility:** schema 8 adds `ai_calls` and its `estimated` column;
+migration is automatic on the first write. Projects that have not been written
+to since upgrading report no model calls, which is accurate — usage is captured
+as calls happen and cannot be reconstructed for runs that already finished.
+
 ## 0.2.0 — Phase 2: standalone AI and the autonomous loop (2026-08-30)
 
 0.1.0 needed a human at every step and Claude Code to think. This release

@@ -105,6 +105,68 @@ class TestExperimentPlanContext:
         assert result.exit_code == 1
 
 
+class TestIdeHandshakeAccounting:
+    """A loop driven from an IDE spends tokens ResearchForge cannot meter.
+
+    It can still size the exchange, and that estimate is what keeps an
+    IDE-driven project from reporting no model cost at all.
+    """
+
+    def _stage(self, isolated_project_dir: Path) -> Path:
+        staging = isolated_project_dir / ".researchforge" / "experiments"
+        (staging / "patches").mkdir(parents=True, exist_ok=True)
+        (staging / "patches" / "improve.patch").write_text(IMPROVING_PATCH, encoding="utf-8")
+        plan = staging / "plan.yaml"
+        plan.write_text(
+            "hypothesis_id: hyp-001\n"
+            "approach_summary: Try caching variants.\n"
+            "experiments:\n"
+            "  - key: improve\n"
+            "    title: Variant improve\n"
+            "    change_summary: Change for improve.\n"
+            "    patch_file: improve.patch\n",
+            encoding="utf-8",
+        )
+        return plan
+
+    def test_importing_an_ide_authored_plan_records_an_estimate(
+        self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path
+    ) -> None:
+        from researchforge.storage.ai_call_repository import list_ai_calls
+
+        # `experiment plan` writes the context that gets handed to the IDE.
+        assert cli_runner.invoke(app, ["experiment", "plan", "hyp-001"]).exit_code == 0
+        plan = self._stage(isolated_project_dir)
+
+        assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
+
+        with closing(open_project_db()) as conn:
+            calls = list_ai_calls(conn)
+
+        assert len(calls) == 1
+        assert calls[0].estimated is True
+        assert calls[0].provider == "ide"
+        assert calls[0].purpose == "planning"
+        assert calls[0].usage.total > 0
+
+    def test_the_estimate_is_counted_but_never_priced(
+        self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path
+    ) -> None:
+        from researchforge.reporting.economics import build_economics
+
+        assert cli_runner.invoke(app, ["experiment", "plan", "hyp-001"]).exit_code == 0
+        plan = self._stage(isolated_project_dir)
+        assert cli_runner.invoke(app, ["experiment", "import", str(plan)]).exit_code == 0
+
+        with closing(open_project_db()) as conn:
+            spend = build_economics(conn).tokens
+
+        assert spend.has_estimates is True
+        assert spend.estimated_tokens > 0
+        assert spend.usd == 0.0
+        assert spend.total_tokens == 0  # nothing was metered
+
+
 class TestPlanImport:
     def test_bare_patch_file_name_resolves_to_the_patches_dir(
         self, cli_runner: CliRunner, baselined_project: Path, isolated_project_dir: Path

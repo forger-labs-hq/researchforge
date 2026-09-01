@@ -19,6 +19,7 @@ import yaml
 
 from researchforge.ai.file_diff import PatchSynthesisError, synthesize_patch
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 from researchforge.experiments.context_export import PATCHES_DIR_NAME, ExperimentContext
 from researchforge.experiments.repo_context import RepoSnapshot
 
@@ -310,7 +311,8 @@ def generate_experiment_plan(
     Raises ValueError with a descriptive message if parsing fails.
     """
     prompt = _build_prompt(ctx)
-    raw = provider.generate(_SYSTEM, prompt, max_tokens=8192)
+    with purpose("planning"):
+        raw = provider.generate(_SYSTEM, prompt, max_tokens=8192)
 
     plan_raw = _extract_tag(raw, "plan")
     files_raw = _extract_tag(raw, "files")

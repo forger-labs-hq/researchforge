@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import closing
 from typing import Annotated
 
@@ -114,6 +115,13 @@ def autorun_command(
         bool,
         typer.Option("--yes", "-y", help="Unattended — skip the first-batch approval prompt."),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Print the move the loop would make next and exit. No AI, nothing runs.",
+        ),
+    ] = False,
     json_output: JsonOption = False,
 ) -> None:
     """Run the autonomous research loop until it stalls, hits the target, or times out.
@@ -130,6 +138,13 @@ def autorun_command(
 
     Interrupted with Ctrl-C? `researchforge autorun --resume` continues with the
     same stall counter and time budget.
+
+    `--dry-run` asks the loop where it would go next — which node it would
+    expand and which hypotheses it would try there — without planning, running,
+    or calling an AI provider. That is how a loop driven from Claude Code or
+    Cursor keeps ResearchForge's search instead of guessing at one:
+
+      researchforge autorun --dry-run --json
     """
     from researchforge.autorun.engine import AutorunDeclined, run_autorun
     from researchforge.storage.contract_repository import get_active_contract
@@ -161,6 +176,10 @@ def autorun_command(
             model=model,
         )
 
+        if dry_run:
+            _print_next_move(conn, config, json_output)
+            return
+
         if not json_output:
             _print_header(config, resume)
 
@@ -185,6 +204,33 @@ def autorun_command(
 
     _print_result(result)
     _print_next_steps(result)
+
+
+def _print_next_move(conn: sqlite3.Connection, config: AutorunConfig, json_output: bool) -> None:
+    """`--dry-run`: where the loop would go next, and the command to take it there."""
+    from researchforge.autorun.engine import preview_next_move
+
+    try:
+        move = preview_next_move(conn, config)
+    except RuntimeError as exc:
+        typer.echo(f"Autorun blocked: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+
+    if json_output:
+        typer.echo(json.dumps(move.as_payload(), indent=2))
+        return
+
+    typer.echo(move.summary)
+    if move.needs_resynthesis:
+        typer.echo("  Every hypothesis has been tried everywhere it can apply.")
+    elif move.retreat:
+        typer.echo(
+            "  Only branches that gained nothing have moves left — this measures an "
+            "idea without the gains already banked."
+        )
+    for hypothesis_id, title in move.hypotheses:
+        typer.echo(f"  {hypothesis_id}  {title}")
+    typer.echo(f"\nNext: {move.command}")
 
 
 def _typed_approval(preview: PlanPreview) -> bool:

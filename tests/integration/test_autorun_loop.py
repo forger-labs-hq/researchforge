@@ -6,18 +6,26 @@ real worktree executor, and the real ranking — so what is exercised here is th
 loop's control flow, its stopping rules, and its persistence.
 """
 
+import json
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from researchforge.ai import service as ai_service
 from researchforge.ai.merge_gen import MergeNotPossibleError
 from researchforge.autorun import engine
-from researchforge.autorun.engine import AutorunConfig, PlanPreview, run_autorun
+from researchforge.autorun.engine import (
+    AutorunConfig,
+    PlanPreview,
+    preview_next_move,
+    run_autorun,
+)
 from researchforge.autorun.state import load_state
+from researchforge.cli import app
 from researchforge.config.paths import research_log_path
 from researchforge.domain.experiment import Experiment
 from researchforge.domain.hypothesis import Hypothesis, Level, NoveltyConfidence
@@ -514,3 +522,139 @@ class TestBlockedProjects:
     ) -> None:
         with pytest.raises(RuntimeError, match="No frozen baseline"):
             _run(AutorunConfig(yes=True))
+
+
+def _add_hypothesis(hypothesis_id: str) -> None:
+    """Put an untried idea on the board, the way re-synthesis would."""
+    with closing(open_project_db()) as conn:
+        project = get_project(conn)
+        assert project is not None
+        replace_hypotheses(conn, project.id, [*list_hypotheses(conn), _hypothesis(hypothesis_id)])
+
+
+class TestPreviewingTheNextMove:
+    """`autorun --dry-run`: the frontier's judgement, without spending anything.
+
+    This is what lets a loop driven from an IDE keep ResearchForge's search
+    instead of re-deriving one by eye from a results table.
+    """
+
+    def test_it_expands_the_best_node_and_names_the_parent(self, fake_ai: FakeAI) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+        _add_hypothesis("hyp-009")
+
+        with closing(open_project_db()) as conn:
+            move = preview_next_move(conn, AutorunConfig())
+
+        assert move.node_id == "exp-001"
+        assert move.node_gain > 0
+        assert ("hyp-009", "Knob idea hyp-009") in move.hypotheses
+        assert move.command == "researchforge experiment plan hyp-009 --parent exp-001"
+        assert move.needs_resynthesis is False
+
+    def test_the_baseline_is_named_by_absence_rather_than_a_sentinel(self, fake_ai: FakeAI) -> None:
+        """A move on the baseline carries no --parent, so the command is runnable."""
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+
+        with closing(open_project_db()) as conn:
+            move = preview_next_move(conn, AutorunConfig())
+
+        assert move.node_id is None
+        assert "--parent" not in move.command
+
+    def test_an_ablation_is_flagged_rather_than_dressed_up_as_progress(
+        self, fake_ai: FakeAI
+    ) -> None:
+        """Everything left sits on a node that gained nothing — say so."""
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+
+        with closing(open_project_db()) as conn:
+            move = preview_next_move(conn, AutorunConfig())
+
+        assert move.retreat is True
+
+    def test_previewing_spends_nothing(self, fake_ai: FakeAI) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+        planned, resynthesized = fake_ai.plan_calls, fake_ai.resynth_calls
+
+        with closing(open_project_db()) as conn:
+            preview_next_move(conn, AutorunConfig())
+            preview_next_move(conn, AutorunConfig())
+
+        assert (fake_ai.plan_calls, fake_ai.resynth_calls) == (planned, resynthesized)
+
+    def test_it_reports_the_metric_the_contract_named(self, fake_ai: FakeAI) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+
+        with closing(open_project_db()) as conn:
+            move = preview_next_move(conn, AutorunConfig())
+
+        assert move.metric_name == "f1"
+
+    def test_a_project_without_a_baseline_is_refused(
+        self, contracted_project: Path, isolated_project_dir: Path
+    ) -> None:
+        with closing(open_project_db()) as conn, pytest.raises(RuntimeError, match="baseline"):
+            preview_next_move(conn, AutorunConfig())
+
+
+class TestPlanningOnTopOfAWinner:
+    """`experiment plan --parent`: the handshake can compound.
+
+    Without it the exported context always described the baseline, so a plan
+    written in an editor could only ever restart from zero — the patch would be
+    authored against one state and applied to another.
+    """
+
+    def test_the_exported_files_are_the_ones_the_parent_leaves(
+        self, fake_ai: FakeAI, cli_runner: CliRunner
+    ) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+        _add_hypothesis("hyp-009")
+
+        result = cli_runner.invoke(
+            app, ["experiment", "plan", "hyp-009", "--parent", "exp-001", "--json"]
+        )
+
+        assert result.exit_code == 0, result.output
+        context = json.loads(result.output)
+        assert context["repository"]["applied"] == ["exp-001"]
+
+    def test_the_author_is_told_to_declare_the_parent(
+        self, fake_ai: FakeAI, cli_runner: CliRunner
+    ) -> None:
+        """Nothing forces `parent:` on a plan typed into an editor, so ask for it."""
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+        _add_hypothesis("hyp-009")
+
+        result = cli_runner.invoke(
+            app, ["experiment", "plan", "hyp-009", "--parent", "exp-001", "--json"]
+        )
+
+        instructions = " ".join(json.loads(result.output)["instructions"])
+        assert "BUILDING ON exp-001" in instructions
+        assert "parent: exp-001" in instructions
+
+    def test_without_a_parent_the_baseline_still_stands_alone(
+        self, fake_ai: FakeAI, cli_runner: CliRunner
+    ) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+        _add_hypothesis("hyp-009")
+
+        result = cli_runner.invoke(app, ["experiment", "plan", "hyp-009", "--json"])
+
+        context = json.loads(result.output)
+        assert context["repository"]["applied"] == []
+        assert not any("BUILDING ON" in line for line in context["instructions"])
+
+    def test_an_unknown_parent_is_refused_before_anything_is_written(
+        self, fake_ai: FakeAI, cli_runner: CliRunner
+    ) -> None:
+        _run(AutorunConfig(global_stall=1, compound=True, yes=True))
+
+        result = cli_runner.invoke(
+            app, ["experiment", "plan", "hyp-001", "--parent", "exp-404", "--json"]
+        )
+
+        assert result.exit_code == 1
+        assert "Unknown experiment id: exp-404" in result.output

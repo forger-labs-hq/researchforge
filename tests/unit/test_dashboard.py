@@ -230,6 +230,66 @@ class TestDashboardCommand:
         assert "<script" not in html
         assert not re.search(r"https?://(?!www\.w3\.org)", html)
 
+    def test_economics_reports_time_used_and_work_avoided(
+        self, cli_runner: CliRunner, validated_project: Path, isolated_project_dir: Path
+    ) -> None:
+        """The section accounts for compute without claiming a human alternative."""
+        result = cli_runner.invoke(app, ["dashboard", "--json"])
+
+        assert result.exit_code == 0, result.output
+        html = Path(json.loads(result.output)["path"]).read_text(encoding="utf-8")
+
+        assert "Time economics" in html
+        assert "Compute used" in html
+        assert "By outcome" in html
+        assert "Work avoided" in html
+        assert "The record" in html
+        # exp-002 bought its metric with latency and was stopped.
+        assert "Caught before it shipped" in html
+
+    def test_outcome_percentages_sum_to_a_whole(self) -> None:
+        """The baseline has no outcome, so these are of experiment compute.
+
+        Sharing the "Compute used" denominator would leave the rows adding up to
+        less than 100% in a table that looks like it should, which reads as an
+        arithmetic bug even when the seconds are right.
+        """
+        from researchforge.reporting.dashboard import _economics_section
+        from researchforge.reporting.economics import (
+            Avoided,
+            Caught,
+            Economics,
+            Record,
+            StageTime,
+        )
+
+        html = _economics_section(
+            Economics(
+                stages=StageTime(baseline=300.0, full=900.0),
+                by_outcome={"kept": 300.0, "rejected": 600.0},
+                avoided=Avoided(),
+                record=Record(experiments=2, kept=1, rejected=1),
+                caught=Caught(),
+            ),
+            "f1",
+        )
+
+        percentages = [int(m) for m in re.findall(r">(\d+)%<", html)]
+        # Four "Compute used" rows are of the total; the rest are of experiments.
+        assert sum(percentages[-2:]) == 100
+        assert "of experiments" in html
+
+    def test_economics_makes_no_counterfactual_claim(
+        self, cli_runner: CliRunner, validated_project: Path, isolated_project_dir: Path
+    ) -> None:
+        """No "would have taken a human N hours" — that number cannot be checked."""
+        result = cli_runner.invoke(app, ["dashboard", "--json"])
+
+        html = Path(json.loads(result.output)["path"]).read_text(encoding="utf-8").lower()
+
+        for claim in ("would have", "manually", "engineer-hour", "saved you", "by hand"):
+            assert claim not in html, f"unfalsifiable claim in dashboard: {claim}"
+
     def test_gate_without_contract(self, cli_runner: CliRunner, initialized_project: Path) -> None:
         result = cli_runner.invoke(app, ["dashboard"])
         assert result.exit_code == 1

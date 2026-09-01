@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from researchforge.ai.usage import AiCall
 from researchforge.config.paths import contract_path, db_path
 from researchforge.domain.baseline import BaselineRun, BaselineStatus
 from researchforge.domain.contract import ExperimentContract
@@ -59,6 +60,7 @@ class ProjectState(BaseModel):
     experiments: list[Experiment] = Field(default_factory=list)
     executions: list[ExperimentExecution] = Field(default_factory=list)
     deliverables: list[Deliverable] = Field(default_factory=list)
+    ai_calls: list[AiCall] = Field(default_factory=list)
 
     @property
     def run_in_progress(self) -> bool:
@@ -70,6 +72,7 @@ def read_state(base: Path | None = None) -> ProjectState:
 
     from researchforge.cli import _next_action
     from researchforge.contract.service import check_contract_drift
+    from researchforge.storage.ai_call_repository import list_ai_calls
     from researchforge.storage.baseline_repository import get_latest_baseline
     from researchforge.storage.contract_repository import get_active_contract
     from researchforge.storage.deliverable_repository import list_deliverables
@@ -131,4 +134,5 @@ def read_state(base: Path | None = None) -> ProjectState:
             experiments=list_experiments(conn),
             executions=list_executions(conn),
             deliverables=list_deliverables(conn),
+            ai_calls=list_ai_calls(conn),
         )

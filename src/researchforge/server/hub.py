@@ -56,6 +56,60 @@ def _logo_html(size: int = 56, extra_style: str = "") -> str:
 HUB_REFRESH_SECONDS = 15
 
 
+def _compute_pill(state: ProjectState) -> str:
+    """How much machine time this project has spent, at a glance.
+
+    The hub answers "which of my projects is worth looking at?", and counts of
+    papers and hypotheses do not distinguish a project that has been thinking
+    from one that has actually been running.
+    """
+    from researchforge.config.settings import load_settings
+    from researchforge.reporting.economics import compute_economics, humanize_seconds
+
+    settings = load_settings()
+    economics = compute_economics(
+        state.experiments,
+        state.executions,
+        [state.baseline] if state.baseline is not None else [],
+        None,
+        calls=state.ai_calls,
+        prices=settings.model_prices,
+        usd_per_hour=settings.local_compute_usd_per_hour,
+    )
+
+    pills = ""
+    total = economics.stages.total
+    if total > 0:
+        pills += f"<span class='stat-pill'>⏱ {escape(humanize_seconds(total))} compute</span>"
+        avoided = economics.avoided.seconds
+        if avoided is not None:
+            pills += f"<span class='stat-pill'>⏭ {escape(humanize_seconds(avoided))} avoided</span>"
+
+    spend = economics.tokens
+    if spend.total_tokens:
+        pills += f"<span class='stat-pill'>◇ {_compact(spend.total_tokens)} tokens</span>"
+        # A dollar figure that silently excludes unpriced models would be worse
+        # than none, so it appears only when every model had a rate.
+        if spend.usd > 0 and spend.fully_priced:
+            pills += f"<span class='stat-pill'>${spend.usd:,.2f}</span>"
+    if spend.has_estimates:
+        # The tilde is the whole point: this project's planning ran in an IDE,
+        # so the figure is sized rather than metered.
+        pills += (
+            f"<span class='stat-pill'>◇ ~{_compact(spend.estimated_tokens)} tokens (IDE)</span>"
+        )
+    return pills
+
+
+def _compact(count: int) -> str:
+    """Token counts at a glance: 1.2M reads faster than 1,234,567 on a card."""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.0f}k"
+    return str(count)
+
+
 def _project_card(entry: RegistryEntry, state: ProjectState | None) -> str:
     """One project on the hub home page; honest about unreadable entries."""
     last_active = entry.last_active[:16].replace("T", " ")
@@ -83,6 +137,7 @@ def _project_card(entry: RegistryEntry, state: ProjectState | None) -> str:
     papers = len(state.papers)
     hypotheses = len(state.hypotheses)
     experiments = len(state.experiments)
+    compute = _compute_pill(state)
     return (
         f"<div class='card project-card s-{escape(status_val)}'>"
         "<div style='display:flex;align-items:flex-start;justify-content:space-between;gap:12px'>"
@@ -95,6 +150,7 @@ def _project_card(entry: RegistryEntry, state: ProjectState | None) -> str:
         f"<span class='stat-pill'>📄 {papers} paper{'s' if papers != 1 else ''}</span>"
         f"<span class='stat-pill'>💡 {hypotheses} hypothesis</span>"
         f"<span class='stat-pill'>⚗ {experiments} exp{'s' if experiments != 1 else ''}</span>"
+        f"{compute}"
         "</div>"
         f"<div class='d' style='margin-top:8px'><code>{escape(entry.path)}</code></div>"
         f"<div class='d'>last active {escape(last_active)}</div>"

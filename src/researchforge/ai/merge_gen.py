@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 
 MAX_BRANCH_PATCH_CHARS = 12_000
 
@@ -124,11 +125,12 @@ def generate_merged_patch(
     Raises MergeNotPossibleError when the AI reports the changes as
     contradictory or returns something that is not a diff.
     """
-    raw = provider.generate(
-        _SYSTEM,
-        build_prompt(left, right, editable_paths, protected_paths),
-        max_tokens=8192,
-    )
+    with purpose("merge"):
+        raw = provider.generate(
+            _SYSTEM,
+            build_prompt(left, right, editable_paths, protected_paths),
+            max_tokens=8192,
+        )
 
     impossible = _extract_tag(raw, "impossible")
     if impossible:

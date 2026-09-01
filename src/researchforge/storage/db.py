@@ -21,7 +21,7 @@ from pathlib import Path
 
 from researchforge.config.paths import db_path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 _V1_TABLES = [
     """
@@ -217,6 +217,32 @@ _V6_TABLES = [
     """,
 ]
 
+_V7_TABLES = [
+    # One row per model call. Tokens are recorded rather than dollars: prices
+    # change and are configuration, so the durable fact is the token count and
+    # the model that produced it, priced at read time.
+    """
+    CREATE TABLE IF NOT EXISTS ai_calls (
+        call_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        duration_seconds REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        estimated INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+]
+
+# Sizing an IDE handshake is an estimate, and an estimate must never be
+# mistaken for a metered count — hence a column rather than a convention.
+_V8_TABLES = [
+    "ALTER TABLE ai_calls ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0",
+]
+
 _MIGRATIONS: dict[int, list[str]] = {
     1: _V1_TABLES,
     2: _V2_TABLES,
@@ -224,6 +250,8 @@ _MIGRATIONS: dict[int, list[str]] = {
     4: _V4_TABLES,
     5: _V5_TABLES,
     6: _V6_TABLES,
+    7: _V7_TABLES,
+    8: _V8_TABLES,
 }
 
 
@@ -241,7 +269,14 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         for version in sorted(_MIGRATIONS):
             if version <= SCHEMA_VERSION:
                 for ddl in _MIGRATIONS[version]:
-                    conn.execute(ddl)
+                    try:
+                        conn.execute(ddl)
+                    except sqlite3.OperationalError:
+                        # `CREATE TABLE IF NOT EXISTS` is idempotent; `ALTER TABLE
+                        # ADD COLUMN` is not, and a database created fresh already
+                        # has the column its migration would add.
+                        if not ddl.lstrip().upper().startswith("ALTER TABLE"):
+                            raise
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             ("schema_version", str(SCHEMA_VERSION)),

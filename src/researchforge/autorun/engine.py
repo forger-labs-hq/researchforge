@@ -394,6 +394,88 @@ def _move_summary(node: NodeStats | None, pending: list[Hypothesis], loop: _Loop
     return f"Expanding {where} · trying {trying}"
 
 
+@dataclass
+class NextMove:
+    """The move the loop would make next, without making it."""
+
+    node_id: str | None
+    """The node to expand. None means the baseline."""
+
+    node_gain: float
+    metric_name: str
+    hypotheses: list[tuple[str, str]]
+    """(id, title) pairs, in the order the frontier ranked them."""
+
+    retreat: bool
+    """True when the only moves left are on branches that gained nothing."""
+
+    needs_resynthesis: bool
+    """True when the graph is exhausted and only new ideas can continue it."""
+
+    summary: str
+    command: str
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "node": self.node_id,
+            "node_gain": self.node_gain,
+            "metric": self.metric_name,
+            "hypotheses": [{"id": h, "title": t} for h, t in self.hypotheses],
+            "retreat": self.retreat,
+            "needs_resynthesis": self.needs_resynthesis,
+            "summary": self.summary,
+            "command": self.command,
+        }
+
+
+def preview_next_move(conn: sqlite3.Connection, config: AutorunConfig) -> NextMove:
+    """Answer "what would you do next?" without planning, running, or calling AI.
+
+    This is the frontier's judgement made available to a caller that supplies its
+    own intelligence — an IDE agent driving the loop by hand gets the same node
+    and the same ranked hypotheses the autonomous loop would have chosen, instead
+    of re-deriving them by eye from a results table.
+    """
+    loop, _ = _prepare(conn)
+    view = build_graph_view(conn, loop.baseline_value, loop.direction)
+    remaining = None if config.max_hours is None else config.max_hours * 60
+
+    retreat = False
+    node, pending = choose_next_move(conn, view, config, loop, remaining)
+    if not pending:
+        retreat = True
+        node, pending = choose_next_move(conn, view, config, loop, remaining, retreat=True)
+
+    if not pending:
+        return NextMove(
+            node_id=None,
+            node_gain=0.0,
+            metric_name=loop.metric_name,
+            hypotheses=[],
+            retreat=False,
+            needs_resynthesis=True,
+            summary="Nothing left to try on any node — the graph needs new hypotheses.",
+            command="researchforge research synthesize --from-results",
+        )
+
+    node_id = node.node_id if node is not None and node.node_id != BASELINE_NODE else None
+    head = pending[0].hypothesis_id
+    command = f"researchforge experiment plan {head}"
+    if node_id is not None:
+        command += f" --parent {node_id}"
+
+    return NextMove(
+        node_id=node_id,
+        node_gain=node.gain if node is not None else 0.0,
+        metric_name=loop.metric_name,
+        hypotheses=[(h.hypothesis_id, h.title) for h in pending],
+        retreat=retreat,
+        needs_resynthesis=False,
+        summary=_move_summary(node, pending, loop),
+        command=command,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Planning
 # ---------------------------------------------------------------------------
@@ -631,6 +713,13 @@ def plan_all_hypotheses(
         write_experiment_context,
     )
     from researchforge.experiments.importers import import_experiment_plan
+
+    # A round with nothing to plan needs no AI. Resolving the provider before
+    # this check made autorun refuse to start without an API key even when every
+    # plan was already imported and the round was pure execution — which is the
+    # only shape a loop driven from an IDE can take.
+    if not hypotheses:
+        return []
 
     try:
         ai_provider = resolve_provider(provider_hint=provider_hint, model_hint=model_hint)
@@ -1071,6 +1160,25 @@ def _persist(state: AutorunState, result: AutorunResult, elapsed: float) -> Auto
 
 
 def run_autorun(
+    conn: sqlite3.Connection,
+    config: AutorunConfig,
+    on_progress: ProgressFn | None = None,
+    gate: ApprovalGate | None = None,
+    resume: bool = False,
+) -> AutorunResult:
+    """Execute the autonomous research loop, accounting for what it spends.
+
+    The loop is where nearly all of a project's model calls happen, so this is
+    where the token ledger is opened and flushed.
+    """
+    from researchforge.storage.ai_call_repository import metered
+
+    project = get_project(conn)
+    with metered(conn, project.id if project is not None else "unknown"):
+        return _run_autorun(conn, config, on_progress, gate, resume)
+
+
+def _run_autorun(
     conn: sqlite3.Connection,
     config: AutorunConfig,
     on_progress: ProgressFn | None = None,

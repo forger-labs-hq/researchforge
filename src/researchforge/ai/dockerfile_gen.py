@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from researchforge.ai.providers import AiProvider
+from researchforge.ai.usage import purpose
 from researchforge.domain.project import Project
 from researchforge.domain.repo_scan import RepoScan
 
@@ -165,7 +166,8 @@ def generate_dockerfile_with_ai(
         "Generate a working Dockerfile for this project."
     )
 
-    raw = provider.generate(_SYSTEM, user_prompt, max_tokens=2048)
+    with purpose("dockerfile"):
+        raw = provider.generate(_SYSTEM, user_prompt, max_tokens=2048)
 
     # Extract from tags
     m = re.search(r"<dockerfile>(.*?)</dockerfile>", raw, re.DOTALL)

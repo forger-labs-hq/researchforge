@@ -1,5 +1,7 @@
 """Autorun loop logic: metric comparison, compound parenting, loop state."""
 
+import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -201,3 +203,53 @@ class TestAutorunState:
 
     def test_absent_state_is_not_resumable(self) -> None:
         assert resumable(None) is False
+
+
+class TestPlanningWithoutAnAiKey:
+    """A round with nothing to plan is a round that needs no AI.
+
+    Resolving the provider before checking that made autorun refuse to start
+    without an API key even when every plan was already imported and the round
+    was pure execution — which is the only shape a loop driven from an IDE can
+    take.
+    """
+
+    def test_an_empty_round_does_not_reach_for_a_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from researchforge.ai import service as ai_service
+        from researchforge.autorun.engine import plan_all_hypotheses
+
+        def refuse(**kwargs: object) -> object:
+            raise RuntimeError("No AI provider configured.")
+
+        monkeypatch.setattr(ai_service, "resolve_provider", refuse)
+
+        with closing(sqlite3.connect(":memory:")) as conn:
+            assert plan_all_hypotheses(conn, [], None, None, None) == []
+
+    def test_planning_something_still_requires_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from researchforge.ai import service as ai_service
+        from researchforge.autorun.engine import plan_all_hypotheses
+        from researchforge.domain.hypothesis import Hypothesis, Level, NoveltyConfidence
+
+        def refuse(**kwargs: object) -> object:
+            raise RuntimeError("No AI provider configured.")
+
+        monkeypatch.setattr(ai_service, "resolve_provider", refuse)
+        hypothesis = Hypothesis(
+            hypothesis_id="hyp-001",
+            title="An idea",
+            claim="It helps.",
+            rationale="Because.",
+            feasibility=Level.HIGH,
+            estimated_effort=Level.LOW,
+            novelty_confidence=NoveltyConfidence.UNKNOWN,
+            proposed_experiment="Try it.",
+        )
+
+        with (
+            closing(sqlite3.connect(":memory:")) as conn,
+            pytest.raises(RuntimeError, match="Cannot plan experiments"),
+        ):
+            plan_all_hypotheses(conn, [hypothesis], None, None, None)

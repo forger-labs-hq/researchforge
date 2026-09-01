@@ -374,7 +374,7 @@ def init(
     cursor: bool = typer.Option(
         False,
         "--cursor",
-        help="Write an always-on Cursor gateway rule into .cursor/rules/researchforge.mdc.",
+        help="Also install the Cursor rules into .cursor/rules/, with an always-on gateway.",
     ),
     json_output: JsonOption = False,
 ) -> None:
@@ -382,7 +382,14 @@ def init(
     from researchforge.claude.installer import InstallReport, install_skills
     from researchforge.config.paths import find_project_root
     from researchforge.config.registry import touch_project
-    from researchforge.cursor.installer import RuleReport, install_gateway
+    from researchforge.cursor.installer import (
+        InstallReport as RulesReport,
+    )
+    from researchforge.cursor.installer import (
+        RuleReport,
+        install_gateway,
+        install_rules,
+    )
 
     already = is_initialized()
     ancestor = None if already else find_project_root(Path.cwd().parent)
@@ -410,7 +417,10 @@ def init(
             touch_project(Path.cwd())
 
     skills: InstallReport | None = install_skills() if claude else None
+    # The gateway alone only tells Cursor the rules exist. Install them too, so
+    # --cursor lands the same workflow guidance --claude does.
     gateway: RuleReport | None = install_gateway() if cursor else None
+    rules: RulesReport | None = install_rules() if cursor else None
 
     if json_output:
         payload: dict[str, object]
@@ -422,6 +432,8 @@ def init(
             payload["skills"] = skills.model_dump()
         if gateway is not None:
             payload["cursor_gateway"] = gateway.model_dump()
+        if rules is not None:
+            payload["cursor_rules"] = rules.model_dump()
         typer.echo(json.dumps(payload, indent=2))
         return
 
@@ -455,9 +467,17 @@ def init(
         )
     if gateway is not None:
         console.print(
-            f"\n[rf.primary]Cursor Gateway[/] [rf.muted]{gateway.action.value}[/]"
+            f"\n[rf.primary]Cursor Rules[/] [rf.muted]gateway {gateway.action.value}[/]"
             f" → [rf.path]{gateway.path}[/]"
         )
+        if rules is not None:
+            for rule in rules.results:
+                console.print(f"  [rf.success]@{rule.rule}[/] [rf.muted]({rule.action.value})[/]")
+            if rules.conflicts:
+                console.print(
+                    "[rf.warning]![/] Modified rules were left untouched; "
+                    "[bold]researchforge cursor install --force[/] overwrites them."
+                )
         console.print(
             "[rf.muted]  Open this folder in Cursor — the AI will know ResearchForge "
             "is here and which rules to use.[/]"

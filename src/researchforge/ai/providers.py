@@ -16,11 +16,64 @@ Resolution order (first match wins):
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+from researchforge.ai.usage import Usage, current_purpose, record_call
 
 # ---------------------------------------------------------------------------
 # Provider protocol
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Meter:
+    """Carries one call's usage from inside the request to the ledger."""
+
+    usage: Usage = field(default_factory=Usage)
+
+
+@contextmanager
+def _metered(name: str) -> Iterator[_Meter]:
+    """Time a model call and file its tokens under the current purpose.
+
+    Usage is recorded even when the call raises: a request that failed after the
+    provider had already read the prompt still cost money, and omitting it would
+    make the total quietly optimistic.
+    """
+    meter = _Meter()
+    provider, _, model = name.partition("/")
+    started = time.monotonic()
+    try:
+        yield meter
+    finally:
+        record_call(
+            purpose=current_purpose(),
+            provider=provider,
+            model=model or name,
+            usage=meter.usage,
+            duration_seconds=time.monotonic() - started,
+        )
+
+
+def _usage_of(raw: object, input_field: str, output_field: str) -> Usage:
+    """Read token counts off an SDK usage object, whatever it calls them.
+
+    Returns zeros rather than raising when a field is missing: an SDK that
+    renames a field, or a local model that reports nothing, should cost us
+    accounting precision and not the generation itself.
+    """
+    if raw is None:
+        return Usage()
+
+    def count(field_name: str) -> int:
+        value = getattr(raw, field_name, None)
+        return value if isinstance(value, int) and value >= 0 else 0
+
+    return Usage(input_tokens=count(input_field), output_tokens=count(output_field))
 
 
 @runtime_checkable
@@ -54,12 +107,14 @@ class AnthropicProvider:
         return f"anthropic/{self._model}"
 
     def generate(self, system: str, user: str, *, max_tokens: int = 8192) -> str:
-        msg = self._client.messages.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
+        with _metered(self.name) as meter:
+            msg = self._client.messages.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            meter.usage = _usage_of(getattr(msg, "usage", None), "input_tokens", "output_tokens")
         block = msg.content[0]
         return block.text if hasattr(block, "text") else str(block)
 
@@ -91,14 +146,20 @@ class GeminiProvider:
     def generate(self, system: str, user: str, *, max_tokens: int = 8192) -> str:
         from google.genai import types as genai_types
 
-        response = self._client.models.generate_content(
-            model=self._model,
-            contents=user,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system,
-                max_output_tokens=max_tokens,
-            ),
-        )
+        with _metered(self.name) as meter:
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=user,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system,
+                    max_output_tokens=max_tokens,
+                ),
+            )
+            meter.usage = _usage_of(
+                getattr(response, "usage_metadata", None),
+                "prompt_token_count",
+                "candidates_token_count",
+            )
         return response.text or ""
 
 
@@ -128,14 +189,18 @@ class OpenAIProvider:
         return f"openai/{self._model}"
 
     def generate(self, system: str, user: str, *, max_tokens: int = 8192) -> str:
-        resp = self._client.chat.completions.create(
-            model=self._model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
+        with _metered(self.name) as meter:
+            resp = self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            )
+            meter.usage = _usage_of(
+                getattr(resp, "usage", None), "prompt_tokens", "completion_tokens"
+            )
         return resp.choices[0].message.content or ""
 
 

@@ -28,6 +28,7 @@ EXPECTED_SKILLS = {
     "researchforge-baseline",
     "researchforge-plan",
     "researchforge-run",
+    "researchforge-autorun",
     "researchforge-results",
     "researchforge-validate",
     "researchforge-ship",
