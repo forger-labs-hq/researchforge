@@ -21,7 +21,7 @@ from pathlib import Path
 
 from researchforge.config.paths import db_path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _V1_TABLES = [
     """
@@ -243,6 +243,60 @@ _V8_TABLES = [
     "ALTER TABLE ai_calls ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0",
 ]
 
+# v9: compliance, governance, and approval tables.
+_V9_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS compliance_runs (
+        compliance_run_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        experiment_id TEXT NOT NULL,
+        checkpoint TEXT NOT NULL,
+        policy_hash TEXT NOT NULL,
+        policy_path TEXT NOT NULL,
+        record TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS compliance_results (
+        result_id TEXT PRIMARY KEY,
+        compliance_run_id TEXT NOT NULL,
+        experiment_id TEXT NOT NULL,
+        gate_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        status TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        record TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS compliance_approvals (
+        approval_id TEXT PRIMARY KEY,
+        experiment_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        policy_hash TEXT NOT NULL DEFAULT '',
+        revoked INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS compliance_waivers (
+        waiver_id TEXT PRIMARY KEY,
+        experiment_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        gate_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        expires_at TEXT,
+        policy_hash TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+]
+
 _MIGRATIONS: dict[int, list[str]] = {
     1: _V1_TABLES,
     2: _V2_TABLES,
@@ -252,6 +306,7 @@ _MIGRATIONS: dict[int, list[str]] = {
     6: _V6_TABLES,
     7: _V7_TABLES,
     8: _V8_TABLES,
+    9: _V9_TABLES,
 }
 
 

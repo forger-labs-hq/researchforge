@@ -38,6 +38,11 @@ class ExperimentStatus(StrEnum):
     VALIDATED = "validated"
     IMPLEMENTATION_READY = "implementation_ready"  # set in Phase 1D
     CANCELLED = "cancelled"
+    # Compliance / governance statuses (Phase compliance)
+    REJECTED_COMPLIANCE = "rejected_compliance"
+    REJECTED_SECURITY = "rejected_security"
+    READY_FOR_APPROVAL = "ready_for_approval"
+    SHIP_ELIGIBLE = "ship_eligible"
 
 
 TERMINAL_STATUSES: frozenset[ExperimentStatus] = frozenset(
@@ -48,6 +53,9 @@ TERMINAL_STATUSES: frozenset[ExperimentStatus] = frozenset(
         ExperimentStatus.VALIDATED,
         ExperimentStatus.IMPLEMENTATION_READY,
         ExperimentStatus.CANCELLED,
+        ExperimentStatus.REJECTED_COMPLIANCE,
+        ExperimentStatus.REJECTED_SECURITY,
+        ExperimentStatus.SHIP_ELIGIBLE,
     }
 )
 
@@ -83,10 +91,24 @@ ALLOWED_TRANSITIONS: dict[ExperimentStatus, frozenset[ExperimentStatus]] = {
             ExperimentStatus.CANCELLED,
         }
     ),
-    ExperimentStatus.VALIDATED: frozenset({ExperimentStatus.IMPLEMENTATION_READY}),
+    ExperimentStatus.VALIDATED: frozenset(
+        {
+            ExperimentStatus.IMPLEMENTATION_READY,
+            ExperimentStatus.READY_FOR_APPROVAL,
+            ExperimentStatus.SHIP_ELIGIBLE,
+            ExperimentStatus.REJECTED_COMPLIANCE,
+            ExperimentStatus.REJECTED_SECURITY,
+        }
+    ),
+    ExperimentStatus.READY_FOR_APPROVAL: frozenset(
+        {ExperimentStatus.SHIP_ELIGIBLE, ExperimentStatus.REJECTED_COMPLIANCE}
+    ),
     ExperimentStatus.FAILED_SETUP: frozenset(),
     ExperimentStatus.FAILED_EXECUTION: frozenset(),
     ExperimentStatus.REJECTED: frozenset(),
+    ExperimentStatus.REJECTED_COMPLIANCE: frozenset(),
+    ExperimentStatus.REJECTED_SECURITY: frozenset(),
+    ExperimentStatus.SHIP_ELIGIBLE: frozenset({ExperimentStatus.IMPLEMENTATION_READY}),
     ExperimentStatus.IMPLEMENTATION_READY: frozenset(),
     ExperimentStatus.CANCELLED: frozenset(),
 }

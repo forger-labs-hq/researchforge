@@ -18,6 +18,7 @@ from researchforge.analytics.service import record_event
 from researchforge.audit.cli import audit_app
 from researchforge.autorun.cli import autorun_command
 from researchforge.claude.cli import claude_app
+from researchforge.compliance.cli import compliance_app
 from researchforge.config.paths import is_initialized, researchforge_dir
 from researchforge.config.paths_cli import paths_command
 from researchforge.contract.cli import contract_app
@@ -180,6 +181,7 @@ app.command("paths", rich_help_panel=SETUP)(paths_command)
 app.add_typer(ship_app, name="ship", rich_help_panel=RESULTS)
 app.add_typer(paper_app, name="paper", rich_help_panel=RESULTS)
 app.add_typer(audit_app, name="audit", rich_help_panel=RESULTS)
+app.add_typer(compliance_app, name="compliance", rich_help_panel=RESULTS)
 app.add_typer(claude_app, name="claude", rich_help_panel=INTEGRATIONS)
 app.add_typer(cursor_app, name="cursor", rich_help_panel=INTEGRATIONS)
 app.add_typer(analytics_app, name="analytics", rich_help_panel=INTEGRATIONS)

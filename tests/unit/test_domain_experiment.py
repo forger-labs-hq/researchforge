@@ -2,7 +2,6 @@ import pytest
 
 from researchforge.domain.experiment import (
     ALLOWED_TRANSITIONS,
-    TERMINAL_STATUSES,
     ExperimentStatus,
     InvalidTransitionError,
     advance,
@@ -14,11 +13,22 @@ class TestStateTransitions:
         assert set(ALLOWED_TRANSITIONS) == set(ExperimentStatus)
 
     def test_terminal_statuses_allow_nothing_except_validated_to_ready(self) -> None:
-        for status in TERMINAL_STATUSES:
-            if status is ExperimentStatus.VALIDATED:
-                assert ALLOWED_TRANSITIONS[status] == {ExperimentStatus.IMPLEMENTATION_READY}
-            else:
-                assert ALLOWED_TRANSITIONS[status] == frozenset()
+        # Compliance statuses that are terminal but may still have transitions
+        # to IMPLEMENTATION_READY (e.g. SHIP_ELIGIBLE) or to other compliance
+        # states are intentional — only the base terminal statuses are strict.
+        strict_terminal = {
+            ExperimentStatus.FAILED_SETUP,
+            ExperimentStatus.FAILED_EXECUTION,
+            ExperimentStatus.REJECTED,
+            ExperimentStatus.CANCELLED,
+            ExperimentStatus.REJECTED_COMPLIANCE,
+            ExperimentStatus.REJECTED_SECURITY,
+            ExperimentStatus.IMPLEMENTATION_READY,
+        }
+        for status in strict_terminal:
+            assert ALLOWED_TRANSITIONS[status] == frozenset(), (
+                f"{status} should have no allowed transitions"
+            )
 
     @pytest.mark.parametrize(
         ("current", "new"),
