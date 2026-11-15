@@ -85,6 +85,11 @@ mypy_path = "src"
 module = ["anthropic.*", "google.*", "openai.*"]
 ignore_missing_imports = true
 
+# torch is only probed to detect a local GPU; it is never a dependency.
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
