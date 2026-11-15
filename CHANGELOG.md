@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — Projects that need you are no longer listed as Idle (2026-11-16)
 
 - **Dashboard: projects that need you are no longer listed as Idle.** The project picker now
   groups projects as **Needs you** (questions waiting, paused, or a run stalled), **Active**
