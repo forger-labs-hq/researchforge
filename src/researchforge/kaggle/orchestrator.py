@@ -293,6 +293,23 @@ def _offer_scheduler_install(slug: str, artifacts_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def code_competition_compute(gpu_preference: str | None) -> str:
+    """Where a code competition's rounds run: a Kaggle notebook, whatever else was asked.
+
+    Only Kaggle notebooks can submit to a code competition, so no choice (or auto)
+    means Kaggle GPU, and a target off Kaggle stops setup with the reason.
+    """
+    if not gpu_preference or gpu_preference.strip().lower() in ("", "auto"):
+        return "kaggle"
+    backend = resolve_compute_target(gpu_preference)
+    if backend not in (GPUBackend.KAGGLE_GPU, GPUBackend.COMPETITION_GPU):
+        raise OvernightError(
+            f"This is a code competition: only Kaggle notebooks can submit, so rounds run on "
+            f"Kaggle GPU. Use --gpu kaggle (or leave --gpu out), not '{gpu_preference}'."
+        )
+    return gpu_preference
+
+
 class OvernightOrchestrator:
     """Main coordinator for Kaggle Overnight."""
 
@@ -629,7 +646,9 @@ class OvernightOrchestrator:
         """Single entry point: auto-detect the right mode and run end-to-end.
 
         Decision logic:
-          - Code competition OR data > available free disk → ideation mode
+          - Code competition → full execution mode on Kaggle GPU: only Kaggle
+            notebooks can submit, so every round runs as one
+          - Data > available free disk → ideation mode
           - Otherwise → full execution mode (setup + experiment loop)
 
         Returns a dict describing what happened and where outputs are.
@@ -659,20 +678,20 @@ class OvernightOrchestrator:
         data_too_large = meta.estimated_data_gb > 0 and meta.estimated_data_gb > free_gb * 0.8
 
         if meta.is_code_competition:
-            mode_reason = "code competition (notebook submission required)"
-        elif data_too_large:
-            mode_reason = (
-                f"data ({meta.estimated_data_gb:.0f} GB) exceeds free disk ({free_gb:.0f} GB)"
-            )
-        else:
-            mode_reason = None  # execution mode
-
-        if mode_reason:
-            return self._run_ideation_flow(meta, ai_provider, mode_reason)
-        else:
+            # Rounds run as Kaggle notebooks, which is also how a code competition submits.
             return self._run_execution_flow(
-                meta, ai_provider, gpu_preference, time_budget_hours, max_experiments
+                meta,
+                ai_provider,
+                code_competition_compute(gpu_preference),
+                time_budget_hours,
+                max_experiments,
             )
+        if data_too_large:
+            reason = f"data ({meta.estimated_data_gb:.0f} GB) exceeds free disk ({free_gb:.0f} GB)"
+            return self._run_ideation_flow(meta, ai_provider, reason)
+        return self._run_execution_flow(
+            meta, ai_provider, gpu_preference, time_budget_hours, max_experiments
+        )
 
     def _run_ideation_flow(
         self, meta: Any, ai_provider: Any, mode_reason: str = ""

@@ -1102,7 +1102,9 @@ def overnight(
     """Improve your Kaggle score overnight. Just provide the competition URL.
 
     Auto-detects the right mode:
-      - Code competition or large dataset → ideation plan with code sketches
+      - Code competition → full experiment loop on Kaggle GPU (rounds run as
+        Kaggle notebooks, the only way such a competition accepts submissions)
+      - Data larger than your free disk → ideation plan with code sketches
       - Otherwise → full experiment loop (propose → benchmark → repeat)
 
     No API key needed — Claude drives the loop using prepare-round / execute-round:

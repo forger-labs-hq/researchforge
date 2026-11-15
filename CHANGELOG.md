@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 — Code competitions run the full loop (2026-11-16)
+
+- **A code competition now gets the experiment loop, on Kaggle GPU.** Setup used to send every
+  code competition to the ideation path, which writes a list of ideas and never creates the
+  loop, so `/overnight`, `kaggle overnight` and **＋ New competition** stopped there and no
+  round could run. Code competitions now take the full setup with Kaggle GPU — rounds run as
+  Kaggle notebooks, the only way such a competition accepts submissions — and choosing other
+  compute stops setup with the reason. Data larger than the free disk still gets the ideation
+  plan.
+
 ## 0.4.1 — Projects that need you are no longer listed as Idle (2026-11-16)
 
 - **Dashboard: projects that need you are no longer listed as Idle.** The project picker now
