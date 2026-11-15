@@ -22,10 +22,8 @@
 </div>
 
 <a id="demo"></a>
-<p align="center">
-  <a href="https://github.com/forger-labs-hq/researchforge/blob/main/assets/ResearchForgeDemo_60s_voice_small.mp4"><img src="https://raw.githubusercontent.com/forger-labs-hq/researchforge/main/assets/demo-thumbnail.png" alt="Watch the 60-second ResearchForge demo" width="820"></a>
-</p>
-<!-- To play the video inline instead: in GitHub's web editor, drag assets/ResearchForgeDemo_60s_voice_small.mp4 into this README and replace the <p> above with the link GitHub creates. -->
+
+https://github.com/user-attachments/assets/4ac96b88-c16d-4332-a660-534ccc3bdec1
 
 # Try it tonight
 
