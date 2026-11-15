@@ -6,7 +6,7 @@
 
 <p><strong>Run experiments on your code overnight. Keep only what beats the baseline.</strong></p>
 
-<p>Give it a Kaggle competition or your repository before bed. On Kaggle it keeps your score current: every hour it finds the public notebooks scoring above you and turns them into rounds, then auto-run keeps experimenting on top of them. On your repository, an AI proposes experiments and ResearchForge measures each one against a frozen baseline, keeping only real wins. Nothing is submitted or shipped without your yes.</p>
+<p>Give it a Kaggle competition or your repository before bed. On Kaggle it keeps your score current: every hour it finds the public notebooks scoring above you and turns them into rounds, then auto-run keeps experimenting on top of them. On your repository, an AI proposes experiments and ResearchForge measures each one against a frozen baseline, keeping only real wins. Nothing is submitted or shipped without your yes. Inspired by https://github.com/karpathy/autoresearch . </p>
 
 <p>
   <a href="https://pypi.org/project/researchforge/"><img src="https://img.shields.io/pypi/v/researchforge?color=7C3AED&label=PyPI" alt="PyPI"></a>
