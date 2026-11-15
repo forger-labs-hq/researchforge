@@ -6,7 +6,8 @@ Auto-detects the provider from environment variables:
   OPENAI_API_KEY → OpenAI (GPT)
 
 Override model via RESEARCHFORGE_LLM=<model-name>
-  Examples: claude-opus-4-5 | gemini-2.0-flash | gpt-4o | http://localhost:11434/api (Ollama)
+  Examples: claude-opus-4-5 | gemini-3.6-flash | gpt-4o | ollama/qwen3:14b (local, no key;
+  server at OLLAMA_HOST, default http://localhost:11434)
 """
 
 from researchforge.ai.providers import AiProvider, get_provider

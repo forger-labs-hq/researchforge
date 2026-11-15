@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "researchforge",
+  "displayName": "ResearchForge",
+  "version": "0.4.0",
+  "description": "Kaggle Overnight (/researchforge:overnight) and an evidence-first research loop for Claude Code: frozen baselines, isolated git-worktree experiments, repeated validation, and every rejected idea kept with its reason. Skills drive the researchforge CLI (pip install researchforge).",
+  "author": {
+    "name": "Forger Labs HQ",
+    "url": "https://www.researchforgehq.com"
+  },
+  "homepage": "https://www.researchforgehq.com",
+  "repository": "https://github.com/forger-labs-hq/researchforge",
+  "documentationUrl": "https://www.researchforgehq.com/docs",
+  "supportUrl": "https://github.com/forger-labs-hq/researchforge/issues",
+  "privacyPolicyUrl": "https://www.researchforgehq.com/privacy",
+  "termsOfServiceUrl": "https://www.researchforgehq.com/terms",
+  "license": "Apache-2.0",
+  "keywords": [
+    "kaggle",
+    "machine-learning",
+    "experiments",
+    "research",
+    "benchmarking",
+    "autoresearch",
+    "arxiv"
+  ]
+}

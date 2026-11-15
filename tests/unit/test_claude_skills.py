@@ -33,6 +33,7 @@ EXPECTED_SKILLS = {
     "researchforge-validate",
     "researchforge-ship",
     "researchforge-paper",
+    "overnight",
 }
 
 RULES_PHRASES = [
@@ -61,7 +62,7 @@ def _cli_command_tree() -> tuple[set[str], dict[str, set[str]]]:
         assert group.name is not None
         groups[group.name] = {
             c.name or (c.callback.__name__ if c.callback else "") for c in sub.registered_commands
-        }
+        } | {g.name for g in sub.registered_groups if g.name}  # e.g. `kaggle keys`
     return top, groups
 
 
@@ -317,3 +318,82 @@ class TestFirstRunOffer:
         install_skills(user=True)
         result = cli_runner.invoke(app, ["paths"], input="")
         assert "Install the Claude Code skills" not in result.output
+
+
+class TestRefreshAfterUpgrade:
+    """Installed skills follow a package upgrade without clobbering user edits."""
+
+    @pytest.fixture
+    def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("RESEARCHFORGE_NO_SKILL_REFRESH")
+        return home
+
+    def _make_stale(self, name: str) -> tuple[Path, str]:
+        """Simulate an install made by an older package version."""
+        import hashlib
+
+        target = Path.home() / ".claude" / "skills" / name / "SKILL.md"
+        old = f"---\nname: {name}\n---\nold version\n"
+        target.write_text(old, encoding="utf-8")
+        manifest = load_manifest(user=True)
+        manifest.hashes[name] = hashlib.sha256(old.encode()).hexdigest()
+        manifest_path(user=True).write_text(manifest.model_dump_json(), encoding="utf-8")
+        return target, old
+
+    def test_no_previous_install_does_nothing(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, home: Path
+    ) -> None:
+        cli_runner.invoke(app, ["paths"])
+        assert not (home / ".claude" / "skills").exists()
+
+    def test_stale_unmodified_skill_is_updated(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, home: Path
+    ) -> None:
+        install_skills(user=True)
+        target, _ = self._make_stale("researchforge-start")
+
+        result = cli_runner.invoke(app, ["paths"])
+
+        assert "Updated ResearchForge Claude skills" in result.output
+        assert target.read_text(encoding="utf-8") == list_packaged_skills()["researchforge-start"]
+        # Up to date now: the next command neither writes nor reports.
+        again = cli_runner.invoke(app, ["paths"])
+        assert "Updated ResearchForge Claude skills" not in again.output
+
+    def test_user_edited_skill_is_left_alone(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, home: Path
+    ) -> None:
+        install_skills(user=True)
+        target = home / ".claude" / "skills" / "researchforge-start" / "SKILL.md"
+        edited = target.read_text(encoding="utf-8") + "\nMy local notes.\n"
+        target.write_text(edited, encoding="utf-8")
+
+        result = cli_runner.invoke(app, ["paths"])
+
+        assert "Updated ResearchForge Claude skills" not in result.output
+        assert target.read_text(encoding="utf-8") == edited
+
+    def test_removed_skill_alone_stays_removed_and_new_skill_is_added(
+        self, cli_runner: CliRunner, isolated_project_dir: Path, home: Path
+    ) -> None:
+        import shutil
+
+        install_skills(user=True)
+        skills = home / ".claude" / "skills"
+        # Removed by the user (still recorded in the manifest): no refresh.
+        shutil.rmtree(skills / "researchforge-ship")
+        result = cli_runner.invoke(app, ["paths"])
+        assert "Updated ResearchForge Claude skills" not in result.output
+        assert not (skills / "researchforge-ship").exists()
+
+        # New in this version (never recorded): installed on the next command.
+        manifest = load_manifest(user=True)
+        manifest.hashes.pop("researchforge-paper")
+        manifest_path(user=True).write_text(manifest.model_dump_json(), encoding="utf-8")
+        shutil.rmtree(skills / "researchforge-paper")
+        result = cli_runner.invoke(app, ["paths"])
+        assert "researchforge-paper" in result.output
+        assert (skills / "researchforge-paper" / "SKILL.md").is_file()

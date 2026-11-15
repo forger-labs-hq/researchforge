@@ -344,6 +344,8 @@ def token_spend(calls: Sequence[AiCall], prices: Mapping[str, ModelPrice]) -> To
         input_tokens += call.usage.input_tokens
         output_tokens += call.usage.output_tokens
 
+        if call.provider == "ollama":
+            continue  # a local model costs compute, not tokens
         price = price_of(call.model, prices)
         if price is None:
             if call.usage.total:

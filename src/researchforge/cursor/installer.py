@@ -67,6 +67,7 @@ Reference these with `@rule-name` for detailed guidance on each stage:
 | `@researchforge-validate` | validating finalists with repeated runs |
 | `@researchforge-ship` | shipping the winning result as a branch or PR |
 | `@researchforge-paper` | building the research publication package |
+| `@overnight` | improving a Kaggle competition score overnight |
 
 ## Rules
 
@@ -150,7 +151,75 @@ def list_packaged_rules() -> dict[str, str]:
         if name.endswith(".mdc"):
             rule_name = name[:-4]  # strip .mdc
             rules[rule_name] = entry.read_text(encoding="utf-8")
+    overnight = overnight_rule()
+    if overnight is not None:
+        rules[OVERNIGHT_RULE_NAME] = overnight
     return dict(sorted(rules.items()))
+
+
+OVERNIGHT_RULE_NAME = "overnight"
+OVERNIGHT_SKILL = ("researchforge.claude.skills", "overnight", "SKILL.md")
+_OVERNIGHT_LOOP_HEADING = "## What you (Claude) do — THE FULL LOOP"
+
+_OVERNIGHT_RULE_HEADER = """\
+---
+description: >-
+  Improve a Kaggle score overnight with ResearchForge. Use when the user gives a
+  Kaggle competition URL or slug, says "overnight" or "@overnight", or wants to
+  improve their Kaggle score.
+globs: ".overnight_*/**"
+alwaysApply: false
+---
+
+# Kaggle Overnight — drive the loop from Cursor
+
+The user gives a competition URL (`https://www.kaggle.com/competitions/<slug>`) or
+slug. ResearchForge is the lab: it gathers facts, runs every experiment on the chosen
+compute, measures it against a frozen baseline and records the result. You are the
+researcher: you read its JSON, ask the user the setup questions and write each round's
+proposal. No API key is needed — you write the proposals.
+
+Requires `pip install researchforge` and a Kaggle API token in `~/.kaggle/kaggle.json`.
+
+"""
+
+
+def overnight_rule() -> str | None:
+    """The Cursor `overnight` rule, built from the packaged `/overnight` Claude skill.
+
+    One source of truth: the loop, commands and rules are the skill's own text, so
+    the two editors can never drift apart. Only the Claude-specific framing changes.
+    """
+    package, skill, filename = OVERNIGHT_SKILL
+    try:
+        text = (resources.files(package) / skill / filename).read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return None
+    body = text.split("---", 2)[2] if text.startswith("---") else text
+    start = body.find(_OVERNIGHT_LOOP_HEADING)
+    if start < 0:
+        return None
+    body = body[start:]
+    for old, new in (
+        (_OVERNIGHT_LOOP_HEADING, "## What you (the agent) do — THE FULL LOOP"),
+        ("YOU (Claude) observe", "YOU observe"),
+        ("from Claude's own reasoning", "from your own reasoning"),
+        ('--source "claude_observation"', '--source "agent_observation"'),
+        ("even when Claude Code is closed", "even when the editor is closed"),
+        # In Cursor, auto-run offers the Cursor agent and an API key.
+        (
+            "Claude Code (`--driver claude`), the Cursor agent\n(`--driver cursor`)",
+            "the Cursor agent (`--driver cursor`)",
+        ),
+        (
+            "(`claude` for the Claude Code driver, `cursor` for Cursor, ",
+            "(`cursor` for the Cursor agent, ",
+        ),
+        ("Claude Code", "the editor"),
+        ("Claude", "the agent"),
+    ):
+        body = body.replace(old, new)
+    return _OVERNIGHT_RULE_HEADER + body
 
 
 def install_rules(

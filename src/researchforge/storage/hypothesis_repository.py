@@ -12,8 +12,43 @@ def replace_hypotheses(
     conn: sqlite3.Connection, project_id: str, hypotheses: list[Hypothesis]
 ) -> None:
     now = datetime.now(UTC).isoformat()
+    new_ids = {h.hypothesis_id for h in hypotheses}
+
+    # Safety net: never delete hypotheses that are referenced by experiment
+    # plans or experiments — doing so would orphan existing plan records.
+    referenced_ids: set[str] = set()
+    for row in conn.execute(
+        "SELECT DISTINCT hypothesis_id FROM experiment_plans WHERE project_id = ?"
+        " UNION SELECT DISTINCT hypothesis_id FROM experiments WHERE project_id = ?",
+        (project_id, project_id),
+    ).fetchall():
+        referenced_ids.add(row[0])
+
+    orphaned = referenced_ids - new_ids  # referenced but NOT in the new set
+    if orphaned:
+        # Load the orphaned rows so we can put them back after the DELETE.
+        placeholders = ",".join("?" * len(orphaned))
+        preserved_rows = conn.execute(
+            f"SELECT hypothesis_id, project_id, title, status, record, "
+            f"imported_at, updated_at FROM hypotheses "
+            f"WHERE hypothesis_id IN ({placeholders}) AND project_id = ?",
+            [*orphaned, project_id],
+        ).fetchall()
+    else:
+        preserved_rows = []
+
     with conn:
         conn.execute("DELETE FROM hypotheses WHERE project_id = ?", (project_id,))
+
+        # Restore orphaned (referenced) hypotheses that were not in the new set
+        for row in preserved_rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO hypotheses "
+                "(hypothesis_id, project_id, title, status, record, "
+                "imported_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+
         for hypothesis in hypotheses:
             conn.execute(
                 """

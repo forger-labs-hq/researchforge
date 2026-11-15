@@ -65,17 +65,34 @@ def import_command(
     json_output: JsonOption = False,
 ) -> None:
     """Validate and import a hypotheses artifact."""
+    new_ids: list[str] = []
+    count = 0
     with closing(open_project_db()) as conn:
         project = get_project(conn)
         if project is None:
             typer.echo("No project found. Run `researchforge project create` first.")
             raise typer.Exit(code=1)
+        before_ids = {h.hypothesis_id for h in list_hypotheses(conn)}
         result = import_hypotheses(conn, file, project.id, load_settings())
-        count = len(list_hypotheses(conn)) if result.ok else 0
+        if result.ok:
+            after = list_hypotheses(conn)
+            new_ids = [h.hypothesis_id for h in after if h.hypothesis_id not in before_ids]
+            count = len(after)  # total count for the success message
     if result.ok:
         from researchforge.analytics.service import record_event
 
         record_event("hypotheses_imported")
+        # Push notification — new_ids captured inside the with block while conn was open
+        try:
+            from researchforge.notifications.service import notify_new_hypotheses
+
+            notify_new_hypotheses(
+                len(new_ids),
+                new_ids,
+                project_name=project.id if project else "",
+            )
+        except Exception:
+            pass
     echo_import_result(
         result.errors,
         result.warnings,

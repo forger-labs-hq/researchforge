@@ -57,8 +57,15 @@ researchforge = "researchforge.cli:app"
 [tool.hatch.version]
 path = "src/researchforge/__init__.py"
 
+[tool.hatch.build.targets.sdist]
+# Demo videos and screenshots are for GitHub, not for installs.
+exclude = ["assets/*.mp4", "assets/screenshots"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/researchforge"]
+# The Claude Code plugin manifest and icon are served from the GitHub marketplace,
+# not from the wheel.
+exclude = ["src/researchforge/claude/.claude-plugin"]
 
 [tool.ruff]
 line-length = 100

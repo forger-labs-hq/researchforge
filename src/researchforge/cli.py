@@ -17,6 +17,7 @@ from researchforge.analytics.cli import analytics_app
 from researchforge.analytics.service import record_event
 from researchforge.audit.cli import audit_app
 from researchforge.autorun.cli import autorun_command
+from researchforge.autorun.unattended_cli import auto_run_app
 from researchforge.claude.cli import claude_app
 from researchforge.compliance.cli import compliance_app
 from researchforge.config.paths import is_initialized, researchforge_dir
@@ -28,6 +29,8 @@ from researchforge.execution.cli import baseline_app
 from researchforge.experiments.cli import experiment_app, results_app, validate_command
 from researchforge.generate import generate_app
 from researchforge.hypotheses.cli import hypotheses_app
+from researchforge.kaggle.cli import kaggle_app
+from researchforge.notifications.cli import notify_app
 from researchforge.project.cli import project_app
 from researchforge.reporting.cli import report_app
 from researchforge.reporting.dashboard_cli import dashboard_command
@@ -54,9 +57,26 @@ app = typer.Typer(
 )
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        from researchforge import __version__
+
+        typer.echo(f"researchforge {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def _root(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_print_version,
+            is_eager=True,
+            help="Print the installed version and exit.",
+        ),
+    ] = False,
     directory: Annotated[
         Path | None,
         typer.Option(
@@ -95,6 +115,8 @@ def _root(
     if ctx.invoked_subcommand not in ("claude", None):
         with suppress(Exception):  # a convenience offer must never break a command
             _offer_skills_once()
+        with suppress(Exception):  # nor may keeping installed skills current
+            _refresh_skills()
 
     if ctx.invoked_subcommand not in ("hub", "serve", None) and not os.environ.get(
         "RESEARCHFORGE_NO_HUB"
@@ -151,6 +173,33 @@ def _offer_skills_once() -> None:
         )
 
 
+def _refresh_skills() -> None:
+    """After a package upgrade, update skills the user installed earlier.
+
+    Only touches installs that have a manifest (the user opted in) and only
+    unmodified or newly added skills — see `refresh_installed_skills`.
+    Opt out with RESEARCHFORGE_NO_SKILL_REFRESH=1.
+    """
+    if os.environ.get("RESEARCHFORGE_NO_SKILL_REFRESH"):
+        return
+    from researchforge.claude.installer import SkillAction, refresh_installed_skills
+
+    for user in (True, False):
+        report = refresh_installed_skills(user=user)
+        if report is None:
+            continue
+        changed = [
+            r.skill
+            for r in report.results
+            if r.action in (SkillAction.INSTALLED, SkillAction.UPDATED)
+        ]
+        if changed:
+            typer.echo(
+                f"Updated ResearchForge Claude skills in {report.skills_dir}: {', '.join(changed)}",
+                err=True,
+            )
+
+
 # `--help` groups the commands by the part of the workflow they belong to. The
 # Hub panel is named for what it is so nobody reaches for a hosted feature
 # expecting it to work from a bare checkout.
@@ -160,9 +209,12 @@ EXPERIMENTS = "Experiments"
 RESULTS = "Results & shipping"
 HUB = "Hub (hosted — requires a running hub)"
 INTEGRATIONS = "Editor integrations"
+KAGGLE = "Kaggle Overnight"
 
 app.add_typer(project_app, name="project", rich_help_panel=SETUP)
 app.add_typer(repo_app, name="repo", rich_help_panel=SETUP)
+app.add_typer(notify_app, name="notify", rich_help_panel=SETUP)
+app.add_typer(kaggle_app, name="kaggle", rich_help_panel=KAGGLE)
 app.add_typer(research_app, name="research", rich_help_panel=RESEARCH)
 app.add_typer(papers_app, name="papers", rich_help_panel=RESEARCH)
 app.add_typer(hypotheses_app, name="hypotheses", rich_help_panel=RESEARCH)
@@ -173,6 +225,7 @@ app.add_typer(baseline_app, name="baseline", rich_help_panel=EXPERIMENTS)
 app.add_typer(experiment_app, name="experiment", rich_help_panel=EXPERIMENTS)
 app.add_typer(results_app, name="results", rich_help_panel=RESULTS)
 app.command("autorun", rich_help_panel=EXPERIMENTS)(autorun_command)
+app.add_typer(auto_run_app, name="auto-run", rich_help_panel=EXPERIMENTS)
 app.command("validate", rich_help_panel=EXPERIMENTS)(validate_command)
 app.command("dashboard", rich_help_panel=RESULTS)(dashboard_command)
 app.command("serve", rich_help_panel=HUB)(serve_command)

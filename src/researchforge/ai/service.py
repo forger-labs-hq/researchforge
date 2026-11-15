@@ -6,7 +6,9 @@ duplicating code.
 
 from __future__ import annotations
 
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,11 +59,33 @@ class SynthesisOutcome:
         return self.landscape_result.ok and self.hypotheses_result.ok
 
 
+_PROVIDER_OVERRIDE: ContextVar[AiProvider | None] = ContextVar(
+    "researchforge_provider_override", default=None
+)
+
+
+@contextmanager
+def provider_override(provider: AiProvider | None) -> Iterator[None]:
+    """Use ``provider`` wherever no provider is named, for the duration of the block.
+
+    Unattended repo auto-run uses this to run the engine with the project's driver —
+    Claude Code or Cursor through their CLIs — instead of an API key from the env.
+    """
+    token = _PROVIDER_OVERRIDE.set(provider)
+    try:
+        yield
+    finally:
+        _PROVIDER_OVERRIDE.reset(token)
+
+
 def resolve_provider(
     provider_hint: str | None = None,
     model_hint: str | None = None,
 ) -> AiProvider:
     """Resolve the AI provider or raise RuntimeError with a clear message."""
+    override = _PROVIDER_OVERRIDE.get()
+    if override is not None and provider_hint is None:
+        return override
     provider = get_provider(provider_hint=provider_hint, model_hint=model_hint)
     if provider is None:
         raise RuntimeError(
@@ -70,7 +94,8 @@ def resolve_provider(
             "  ANTHROPIC_API_KEY=sk-ant-...\n"
             "  GEMINI_API_KEY=...\n"
             "  OPENAI_API_KEY=sk-...\n"
-            "Or pass --provider anthropic|google|openai"
+            "  RESEARCHFORGE_LLM=ollama/qwen3:14b   (local model, no key)\n"
+            "Or pass --provider anthropic|google|openai|ollama"
         )
     return provider
 

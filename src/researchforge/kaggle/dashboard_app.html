@@ -1,0 +1,1675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="rf-token" content="__RF_TOKEN__">
+<title>ResearchForge Dashboard</title>
+<style>
+:root {
+  --bg: #0f1117; --panel: #161b27; --panel2: #1a2035; --border: #232c3d; --text: #e2e8f0;
+  --muted: #94a3b8; --dim: #64748b; --accent: #60a5fa; --green: #4ade80; --red: #f87171;
+  --amber: #fbbf24; --cyan: #22d3ee; --purple: #c084fc; --slate: #475569;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+code, .mono { font-family: var(--mono); font-size: 12px; }
+code { background: #0b0e14; border: 1px solid var(--border); padding: 0 4px; border-radius: 4px; word-break: break-all; }
+button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .5; cursor: progress; }
+button.primary { background: #1e3a8a; border-color: #2563eb; }
+input[type=text], input[type=number], input[type=password], textarea, select { font: inherit; color: var(--text); background: #0b0e14;
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+.app { display: flex; height: 100vh; }
+aside { width: 230px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; }
+.brand { padding: 14px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.logo { width: 26px; height: 26px; border-radius: 6px; background: #2563eb; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.sel { padding: 10px; border-bottom: 1px solid var(--border); }
+.sel select { width: 100%; }
+.sel label { display: flex; gap: 6px; align-items: center; color: var(--muted); margin-top: 8px; font-size: 12px; }
+nav { padding: 8px; flex: 1; overflow-y: auto; }
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; border-radius: 6px;
+  color: var(--muted); cursor: pointer; user-select: none; }
+.nav:hover { background: var(--panel2); color: var(--text); }
+.nav.active { background: #1e2f4d; color: var(--accent); }
+.nav .count { font-size: 11px; color: var(--dim); }
+.foot { padding: 10px 12px; border-top: 1px solid var(--border); font-size: 11px; color: var(--dim); }
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: #0c0f15; }
+header h1 { font-size: 15px; margin: 0; white-space: nowrap; }
+header .crumb { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; max-width: 40%; }
+header .search { flex: 1 1 220px; min-width: 180px; max-width: 380px; margin-left: auto; }
+header .search input { width: 100%; }
+.live { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.bell { position: relative; padding: 4px 10px; font-size: 14px; line-height: 1; }
+.bell .n { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+.bell .n.old { background: #475569; }
+.inbox { position: fixed; top: 52px; right: 16px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow: auto; z-index: 8; background: #0f141d; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.inbox .grp { padding: 8px 12px 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.qcard { padding: 10px 12px; border-top: 1px solid var(--border); }
+.qhead { display: flex; width: 100%; align-items: baseline; gap: 8px; padding: 8px 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
+.qhead:hover { background: rgba(255,255,255,.03); }
+.qhead .caret { width: 10px; color: var(--muted); }
+.qhead .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+.qcard .q { margin: 2px 0 6px; }
+.qcard .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--red); margin-right: 6px; vertical-align: middle; }
+#content { flex: 1; overflow-y: auto; padding: 16px 18px 40px; }
+.grid { display: grid; gap: 12px; }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.card > .hd, details.card > summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--panel2); border-bottom: 1px solid var(--border); border-radius: 8px 8px 0 0; }
+details.card > summary { cursor: pointer; list-style: none; }
+details.card:not([open]) > summary { border-bottom: 0; border-radius: 8px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::before { content: "▸"; color: var(--dim); transition: transform .15s; }
+details.card[open] > summary::before { transform: rotate(90deg); }
+.bd { padding: 10px 12px; }
+.title { font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; }
+.dim { color: var(--dim); }
+.right { margin-left: auto; }
+.row { display: flex; gap: 10px; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.row > *, .grid > *, .flex > * { min-width: 0; }
+.row { overflow-wrap: anywhere; }
+.row.click { cursor: pointer; } .row.click:hover { background: var(--panel2); }
+.stat { padding: 12px; } .stat .v { font-size: 22px; font-weight: 700; } .stat .l { color: var(--muted); font-size: 12px; }
+.badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.b-green { color: var(--green); border-color: #166534; background: #052e16; }
+.b-red { color: var(--red); border-color: #991b1b; background: #450a0a; }
+.b-amber { color: var(--amber); border-color: #92400e; background: #422006; }
+.b-blue { color: var(--accent); border-color: #1d4ed8; background: #172554; }
+.b-cyan { color: var(--cyan); border-color: #155e75; background: #083344; }
+.b-purple { color: var(--purple); border-color: #6b21a8; background: #3b0764; }
+.b-gray { color: var(--muted); border-color: #334155; background: #1e2635; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.d-green { background: var(--green); } .d-red { background: var(--red); } .d-amber { background: var(--amber); }
+.d-gray { background: var(--slate); } .d-blue { background: var(--accent); }
+.pulse { animation: pulse 1.4s infinite; } @keyframes pulse { 50% { opacity: .35; } }
+.issue { display: flex; gap: 8px; padding: 6px 10px; border-radius: 6px; margin: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
+.issue > div { min-width: 0; }
+.issue.error { background: #2a0f12; border: 1px solid #7f1d1d; }
+.issue.warn { background: #2a1d06; border: 1px solid #78350f; }
+.issue.info { background: #0f1a2e; border: 1px solid #1e3a8a; }
+.empty { color: var(--muted); padding: 20px; text-align: center; }
+.empty b { color: var(--text); }
+.tbl { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  padding: 7px 10px; background: var(--panel2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--panel2); }
+.trunc { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toggle { position: relative; width: 34px; height: 19px; flex-shrink: 0; display: inline-block; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle span { position: absolute; inset: 0; background: #334155; border-radius: 20px; transition: .2s; cursor: pointer; }
+.toggle span::before { content: ""; position: absolute; width: 13px; height: 13px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+.toggle input:checked + span { background: #3b82f6; }
+.toggle input:checked + span::before { transform: translateX(15px); }
+.toggle input:disabled + span { opacity: .5; cursor: progress; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); cursor: pointer; font-size: 12px; user-select: none; }
+.chip.on { border-color: var(--accent); color: var(--accent); background: #172554; }
+pre.log { background: #0b0e14; border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin: 6px 0 0;
+  font: 11px/1.4 var(--mono); color: var(--muted); max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.dag { overflow-x: auto; padding: 6px 0; }
+.dag svg text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.dag .node { cursor: pointer; }
+.dag .node:hover rect { stroke-width: 2.5; }
+.kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 12px; }
+.kv > div:nth-child(odd) { color: var(--muted); }
+.toast { position: fixed; right: 16px; bottom: 16px; z-index: 9; display: flex; flex-direction: column; gap: 8px; max-width: 420px; }
+.toast div { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 30px #0008; font-size: 12px; white-space: pre-wrap; }
+.toast .err { border-color: #7f1d1d; } .toast .ok { border-color: #166534; }
+.mb { margin-bottom: 12px; } .mt { margin-top: 12px; }
+.sec { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); margin: 16px 0 8px; }
+.flex { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 800px) {
+  .app { flex-direction: column; height: auto; min-height: 100vh; }
+  aside { width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+  nav { display: flex; overflow-x: auto; padding: 6px; } .nav { flex-shrink: 0; gap: 6px; }
+  .foot { display: none; }
+  header { flex-wrap: wrap; } header .search { max-width: none; flex-basis: 100%; }
+  #content { padding: 12px 12px 40px; overflow: visible; }
+  .trunc { max-width: 180px; }
+  .g2 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><div class="logo">RF</div>ResearchForge</div>
+    <div class="sel">
+      <select id="project-select" aria-label="Project filter"></select>
+      <label><input type="checkbox" id="show-copies"> Show backups &amp; worktree copies</label>
+    </div>
+    <nav id="nav"></nav>
+    <div class="foot" id="foot">Connecting…</div>
+  </aside>
+  <main>
+    <header>
+      <h1 id="view-title">Home</h1>
+      <span class="crumb" id="crumb"></span>
+      <div class="search"><input type="text" id="search" placeholder="Search everything in this view…" autocomplete="off"></div>
+      <button class="bell" id="bell" data-act="bell" aria-label="Questions waiting for you" title="Questions waiting for you">🔔<span class="n" id="bell-n" hidden></span></button>
+      <span class="live" id="live"><span class="dot d-gray"></span>Connecting</span>
+    </header>
+    <div class="inbox" id="inbox" hidden></div>
+    <div id="content"><div class="empty">Loading live state…</div></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+let TOKEN = document.querySelector('meta[name="rf-token"]').content;
+const VIEWS = [
+  ["home", "Home"], ["steer", "Steer"], ["configs", "Run configs"], ["automation", "Automation"], ["runs", "Runs"], ["dag", "DAG"],
+  ["hypotheses", "Hypotheses"], ["submissions", "Submissions"], ["timeline", "Timeline"], ["insights", "Insights"],
+  ["new", "＋ New competition"], ["keys", "Keys & accounts"],
+];
+const POLL_MS = 4000, POLL_HIDDEN_MS = 15000;
+
+// ── State ──────────────────────────────────────────────────────────────────
+const S = {
+  data: null, etag: null, lastOk: 0, fails: 0, pollTimer: null,
+  route: { view: "home", p: "all", n: "", q: "" },
+  showCopies: lsGet("rf.showCopies") === "1",
+  open: new Map(JSON.parse(lsGet("rf.open") || "[]")),
+  chips: JSON.parse(lsGet("rf.chips") || "{}"),
+  scroll: {}, busy: new Set(), drv: {}, ans: {}, cfg: {}, inboxOpen: false,  // cfg: unsaved Run configs edits
+  wiz: {}, cloudGpus: {},  // wiz: unsaved New competition answers, per draft
+  qSeen: lsGet("rf.qSeen") || "",  // questions asked after this are marked new
+  qOpen: new Set(JSON.parse(lsGet("rf.qOpen") || "[]")),  // question groups opened, per list
+   // drv: a driver picked but not saved yet, per project
+};
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+// ── Routing: the view, project, node and search live in the URL hash, so a
+//    reload (or a shared link) restores exactly what you were looking at. ───
+function parseHash() {
+  const h = location.hash.replace(/^#\/?/, "");
+  const [view, qs] = h.split("?");
+  const p = new URLSearchParams(qs || "");
+  return { view: VIEWS.some(v => v[0] === view) ? view : "home", p: p.get("p") || "all", n: p.get("n") || "", q: p.get("q") || "" };
+}
+function hashOf(r) {
+  const p = new URLSearchParams();
+  if (r.p && r.p !== "all") p.set("p", r.p);
+  if (r.n) p.set("n", r.n);
+  if (r.q) p.set("q", r.q);
+  const qs = p.toString();
+  return "#/" + r.view + (qs ? "?" + qs : "");
+}
+function go(patch, replace) {
+  const next = Object.assign({}, S.route, patch);
+  if (patch.view && patch.view !== S.route.view && !("n" in patch)) next.n = "";
+  const h = hashOf(next);
+  if (replace) { history.replaceState(null, "", h); applyRoute(); }
+  else if (h !== location.hash) location.hash = h; else applyRoute();
+}
+function applyRoute() {
+  const prevView = S.route.view;
+  S.scroll[prevView] = document.getElementById("content").scrollTop;
+  S.route = parseHash();
+  const s = document.getElementById("search");
+  if (document.activeElement !== s) s.value = S.route.q;
+  render(prevView !== S.route.view);
+}
+window.addEventListener("hashchange", applyRoute);
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function ago(ts) {
+  if (!ts) return "—";
+  const t = new Date(ts).getTime(); if (isNaN(t)) return esc(ts);
+  let s = Math.round((Date.now() - t) / 1000); const fut = s < 0; s = Math.abs(s);
+  const u = s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m" : s < 86400 ? Math.floor(s / 3600) + "h" : Math.floor(s / 86400) + "d";
+  return fut ? "in " + u : u + " ago";
+}
+// Payload timestamps are local-naive ISO strings; compare against local time.
+function localNow() { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); }
+const when = ts => ts ? `<span title="${esc(ts)}" data-ts="${esc(ts)}">${ago(ts)}</span>` : '<span class="dim">—</span>';
+const DRIVER_NAMES = { claude: "Claude Code", cursor: "Cursor agent", byok: "API key", manual: "manual" };
+const fmtM = v => typeof v === "number" ? (Math.abs(v) >= 1000 ? v.toFixed(1) : v.toFixed(4)) : "—";
+const plural = (n, w) => `${n} ${n === 1 ? w : /is$/.test(w) ? w.slice(0, -2) + "es" : w + "s"}`;
+function dur(s) { if (!s) return "—"; s = Math.round(s); return s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h"; }
+function countdown(ts) {
+  if (!ts) return "";
+  const ms = new Date(ts) - new Date();
+  if (isNaN(ms)) return "";
+  if (ms <= 0) return "ended " + ago(ts);
+  const d = Math.floor(ms / 864e5), hh = Math.floor(ms % 864e5 / 36e5);
+  return `${d}d ${hh}h left`;
+}
+const ACTIVE = ["running", "paused", "waiting", "stalled", "watching", "recent"];
+function delta(e) {
+  if (typeof e.metric !== "number" || typeof e.baseline !== "number" || !e.baseline) return "";
+  const d = e.metric - e.baseline, good = (e.metric_direction || "max").startsWith("max") ? d > 0 : d < 0;
+  return `<span class="${good ? "" : "dim"}" style="color:${good ? "var(--green)" : ""}">${d >= 0 ? "+" : ""}${d.toFixed(4)}</span>`;
+}
+const STATUS = {
+  improved: "b-green", complete: "b-gray", failed: "b-red", unscored: "b-purple", on: "b-green", off: "b-gray", running: "b-amber", stale: "b-gray", planned: "b-blue",
+  cancelled: "b-gray", tested: "b-gray", untested: "b-cyan", speculative: "b-cyan", approved: "b-green", rejected: "b-red",
+  draft: "b-purple", ok: "b-green", error: "b-red", disabled: "b-gray", skipped: "b-gray", never: "b-gray", unknown: "b-amber",
+  watching: "b-cyan", recent: "b-blue", idle: "b-gray", worktree: "b-purple", backup: "b-purple", waiting: "b-amber", paused: "b-amber", stalled: "b-red",
+  not_installed: "b-gray", installed_not_loaded: "b-amber", failing: "b-red", pending: "b-gray", complete_sub: "b-green",
+};
+const LABEL = { waiting: "waiting for you", complete_sub: "complete", skipped: "waiting", never: "never run", not_installed: "not installed", installed_not_loaded: "not loaded", no_improvement: "no change" };
+const badge = (s, extra) => `<span class="badge ${STATUS[s] || "b-gray"}${s === "running" ? " pulse" : ""}"${extra ? ` title="${esc(extra)}"` : ""}>${esc(LABEL[s] || s || "—")}</span>`;
+function match(...parts) {
+  const q = S.route.q.trim().toLowerCase(); if (!q) return true;
+  const hay = parts.map(p => typeof p === "string" ? p : JSON.stringify(p ?? "")).join(" ").toLowerCase();
+  return q.split(/\s+/).every(t => hay.includes(t));
+}
+function isOpen(key, dflt) { return S.open.has(key) ? S.open.get(key) : dflt; }
+const det = (key, dflt) => `data-key="${esc(key)}"${isOpen(key, dflt) ? " open" : ""}`;
+function issues(list, levels) {
+  return (list || []).filter(i => !levels || levels.includes(i.level)).map(i =>
+    `<div class="issue ${esc(i.level)}"><span>${i.level === "error" ? "⛔" : i.level === "warn" ? "⚠️" : "ℹ️"}</span><div>${esc(i.message)}${i.hint ? `<div class="dim">${esc(i.hint)}</div>` : ""}</div></div>`).join("");
+}
+const kindBadges = p => p.kinds.map(k => `<span class="badge ${k === "kaggle" ? "b-blue" : "b-purple"}">${k === "kaggle" ? "kaggle overnight" : "repo project"}</span>`).join(" ");
+const shortPath = s => esc(String(s || "").replace(/^\/Users\/[^/]+/, "~"));
+function toast(msg, kind) {
+  const el = document.createElement("div"); el.className = kind || ""; el.textContent = msg;
+  document.getElementById("toast").appendChild(el); setTimeout(() => el.remove(), kind === "err" ? 9000 : 5000);
+}
+
+// ── Data selection ─────────────────────────────────────────────────────────
+function allProjects() { return S.data ? S.data.projects : []; }
+function byId(id) { return allProjects().find(p => p.id === id); }
+function projects() {
+  const sel = S.route.p;
+  if (sel !== "all") { const p = byId(sel); return p ? [p] : []; }
+  return allProjects().filter(p => S.showCopies || p.role === "primary");
+}
+function projectLabel(p) {
+  const loc = p.root.replace(/^\/Users\/[^/]+\/Desktop\//, "").replace(/^\/Users\/[^/]+/, "~");
+  return `${p.name} — ${loc}`;
+}
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-RF-Token": TOKEN }, body: JSON.stringify(body || {}) });
+  let j = {}; try { j = await r.json(); } catch (e) { j = { ok: false, error: "invalid response" }; }
+  if (!r.ok || !j.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+async function act(key, fn, okMsg) {
+  if (S.busy.has(key)) return;
+  S.busy.add(key); render();
+  try { const j = await fn(); toast((okMsg || "Done") + (j.output ? "\n" + j.output : ""), "ok"); }
+  catch (e) { toast("Failed: " + e.message, "err"); }
+  finally { S.busy.delete(key); S.etag = null; await poll(true); render(); }
+}
+
+// ── Polling: ETag-conditional GET; only re-render when the payload changed ─
+async function poll(once) {
+  if (!once) clearTimeout(S.pollTimer);  // a one-off refresh must not cancel the loop
+  S.pollStarted = Date.now();
+  // A request caught by a server restart can hang forever; never let it stall polling.
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch("/api/state", { headers: S.etag ? { "If-None-Match": S.etag } : {}, cache: "no-store", signal: ctl.signal });
+    if (r.status === 200) {
+      const data = await r.json();
+      TOKEN = r.headers.get("X-RF-Token") || TOKEN;
+      // A restarted (possibly upgraded) server: reload the shell; the hash keeps our place.
+      if (S.serverStart && data.server && data.server.started_at !== S.serverStart) { location.reload(); return; }
+      S.serverStart = data.server && data.server.started_at;
+      S.data = data; S.etag = r.headers.get("ETag"); render();
+    }
+    else if (r.status !== 304) throw new Error("HTTP " + r.status);
+    S.lastOk = Date.now(); S.fails = 0;
+  } catch (e) { S.fails++; }
+  finally { clearTimeout(timer); }
+  tick();
+  if (!once) S.pollTimer = setTimeout(poll, document.hidden ? POLL_HIDDEN_MS : POLL_MS);
+}
+// Watchdog: restart the loop if no poll has started for a while (e.g. timers throttled).
+setInterval(() => { if (S.pollStarted && Date.now() - S.pollStarted > POLL_HIDDEN_MS + 12000) poll(); }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+function tick() {
+  const live = document.getElementById("live");
+  const age = S.lastOk ? Math.round((Date.now() - S.lastOk) / 1000) : null;
+  if (!S.lastOk) live.innerHTML = `<span class="dot d-gray"></span>Connecting`;
+  else if (S.fails >= 3) live.innerHTML = `<span class="dot d-red"></span><span style="color:var(--red)">Offline — last update ${age}s ago</span>`;
+  else if (S.fails) live.innerHTML = `<span class="dot d-amber pulse"></span><span style="color:var(--amber)">Reconnecting…</span>`;
+  else live.innerHTML = `<span class="dot d-green pulse"></span><span style="color:var(--green)">Live</span><span class="dim">· ${age}s</span>`;
+  document.querySelectorAll("[data-ts]").forEach(el => { el.textContent = ago(el.dataset.ts); });
+  if (S.data) document.getElementById("foot").innerHTML =
+    `Data changed ${ago(S.data.generated_at)} (built in ${S.data.build_ms}ms)<br>${plural(S.data.totals.projects, "project")} · ${S.data.discovery.scan_roots.length} scan roots${(S.data.discovery.hidden_roots || []).length ? ` · ${S.data.discovery.hidden_roots.length} hidden` : ""}<br>Polling every ${POLL_MS / 1000}s`;
+}
+setInterval(tick, 1000);
+
+// ── Chrome (nav, selector) ─────────────────────────────────────────────────
+function renderChrome() {
+  if (S.data) renderInbox();
+  const ps = projects(), t = S.data ? S.data.totals : null;
+  const counts = t ? {
+    runs: ps.reduce((a, p) => a + p.experiments.length, 0),
+    hypotheses: ps.reduce((a, p) => a + p.hypotheses.length, 0),
+    automation: ps.filter(p => p.overnight).length,
+    configs: ps.filter(p => p.overnight && p.role === "primary").length,
+    submissions: ps.reduce((a, p) => a + p.submissions.items.length, 0),
+  } : {};
+  document.getElementById("nav").innerHTML = VIEWS.map(([k, label]) =>
+    `<div class="nav${S.route.view === k ? " active" : ""}" data-act="nav" data-view="${k}"><span>${label}</span><span class="count">${counts[k] ?? ""}</span></div>`).join("");
+  const sel = document.getElementById("project-select");
+  const groups = { Active: [], Idle: [], Copies: [] };
+  allProjects().forEach(p => {
+    const g = p.role !== "primary" ? "Copies" : ["running", "watching", "recent"].includes(p.state) ? "Active" : "Idle";
+    if (g === "Copies" && !S.showCopies && S.route.p !== p.id) return;
+    groups[g].push(p);
+  });
+  const opts = [`<option value="all">All projects (${t ? t.projects : 0})</option>`];
+  for (const [g, list] of Object.entries(groups)) {
+    if (!list.length) continue;
+    opts.push(`<optgroup label="${g}">` + list.map(p =>
+      `<option value="${p.id}"${S.route.p === p.id ? " selected" : ""}>${esc(projectLabel(p))}</option>`).join("") + "</optgroup>");
+  }
+  sel.innerHTML = opts.join("");
+  sel.value = S.route.p !== "all" && byId(S.route.p) ? S.route.p : "all";
+  document.getElementById("show-copies").checked = S.showCopies;
+  const v = VIEWS.find(v => v[0] === S.route.view);
+  document.getElementById("view-title").textContent = v ? v[1] : "Home";
+  const cur = S.route.p !== "all" ? byId(S.route.p) : null;
+  document.getElementById("crumb").innerHTML = cur ? `${esc(cur.name)} <span class="dim">· ${shortPath(cur.location)}</span>` :
+    (S.route.p !== "all" && S.data ? `<span style="color:var(--amber)">Selected project no longer on disk</span>` : "");
+  document.title = (cur ? cur.name + " · " : "") + (v ? v[1] : "Home") + " · ResearchForge";
+}
+
+function render(viewChanged) {
+  // Never redraw under someone typing a setting or an answer; redraw when they leave the field.
+  const ae = document.activeElement;
+  if (!viewChanged && ae && ae.dataset && (ae.dataset.cfg || ae.dataset.ans || (ae.dataset.wiz && ae.type !== "checkbox" && ae.type !== "radio")) && ae.closest("#content")) { S.renderPending = true; renderInbox(); return; }
+  S.renderPending = false;
+  renderChrome();
+  const el = document.getElementById("content");
+  if (!S.data) return;
+  const keep = viewChanged ? (S.scroll[S.route.view] || 0) : el.scrollTop;
+  const fn = { home: vHome, steer: vSteer, new: vNew, keys: vKeys, configs: vConfigs, automation: vAutomation, runs: vRuns, dag: vDag, hypotheses: vHyp, submissions: vSubs, timeline: vTimeline, insights: vInsights }[S.route.view];
+  let html;
+  try { html = fn(); } catch (e) { html = `<div class="issue error">Render error in ${esc(S.route.view)}: ${esc(e.message)}</div>`; console.error(e); }
+  el.innerHTML = html;
+  el.scrollTop = keep;
+  if (S.route.view === "keys" && S.route.n && S.keyScrolled !== S.route.n) {  // keys open <name>
+    S.keyScrolled = S.route.n;
+    const k = document.getElementById("key-" + S.route.n); if (k) k.scrollIntoView({ block: "center" });
+  }
+  tick();
+}
+
+// ── Keys & accounts ─────────────────────────────────────────────────────────
+// One place for every credential. A pasted value goes to the server once and is never
+// shown again; rows carry names, where it is set and the last test — never values.
+const KEY_GROUPS = { kaggle: "Kaggle", ai: "AI API keys", driver: "Unattended drivers", compute: "Compute" };
+function keyBadge(r) {
+  if (!r.set) return '<span class="badge b-gray">not set</span>';
+  if (r.test && !r.test.ok) return '<span class="badge b-red">test failed</span>';
+  return r.test ? '<span class="badge b-green">working</span>' : '<span class="badge b-amber">set · not tested</span>';
+}
+function vKeys() {
+  const rows = S.data.keys || [];
+  let h = `<div class="sub mb">Every key ResearchForge uses, in one place. What you paste is saved on this machine — Kaggle's in <code>~/.kaggle</code>, the rest in <code>~/.config/researchforge/auto_run.env</code> (mode 600) where unattended runs and the background monitor read it — and is never shown again, here or to an agent. In Claude Code or Cursor, <code>/overnight</code> asks which accounts you want and opens this page for the ones missing.</div>`;
+  for (const [g, title] of Object.entries(KEY_GROUPS)) {
+    const list = rows.filter(r => r.group === g && match(r.label, r.name, r.used_for, r.get_it));
+    if (list.length) h += `<div class="sec">${title}</div><div class="card mb">${list.map(keyRow).join("")}</div>`;
+  }
+  return h;
+}
+function keyRow(r) {
+  const b = S.busy.has("key:" + r.name) ? "disabled" : "", focus = S.route.n === r.name;
+  let h = `<div class="bd" id="key-${esc(r.name)}" style="border-bottom:1px solid var(--border)${focus ? ";box-shadow:inset 3px 0 var(--accent)" : ""}">
+    <div class="flex"><b>${esc(r.label)}</b>${keyBadge(r)}<span class="sub">${esc(r.used_for)}</span></div>
+    <div class="sub">${r.set ? `Set in <code>${shortPath(r.where)}</code>` : `Get it: ${esc(r.get_it)}`}${r.test ? ` · tested ${when(r.test.at)}: ${esc(r.test.detail)}` : ""}</div>`;
+  if (r.name === "colab") return h + colabKeyControls(r) + "</div>";
+  h += `<div class="flex mt">`;
+  if (r.settable) {
+    if (r.name === "kaggle") h += `<input type="text" placeholder="username (legacy key only)" data-ans="keyuser:kaggle" value="${esc(S.ans["keyuser:kaggle"] || "")}" style="width:190px" autocomplete="off" aria-label="Kaggle username">`;
+    h += `<input type="password" placeholder="${r.set ? "paste a new value to replace it" : "paste " + esc(r.env || "the token")}" data-ans="key:${esc(r.name)}" value="${esc(S.ans["key:" + r.name] || "")}" style="flex:1;min-width:200px" autocomplete="off" aria-label="${esc(r.label)}">
+      <button class="primary" data-act="key-set" data-name="${esc(r.name)}" ${b}>${b ? "Saving…" : "Save & test"}</button>`;
+  }
+  if (r.set || !r.settable) h += `<button data-act="key-test" data-name="${esc(r.name)}" ${b} title="${r.name === "claude" ? "Sends one tiny prompt on the token" : "One harmless call with the stored key"}">Test</button>`;
+  if (r.set && r.env) h += `<button data-act="key-remove" data-name="${esc(r.name)}" ${b}>Remove</button>`;
+  return h + "</div></div>";
+}
+function colabKeyControls(r) {
+  if (S.colabUrl) return `<div class="mt sub">1. <a href="${esc(S.colabUrl)}" target="_blank" rel="noopener">Open Google's sign-in</a> and approve. 2. Paste the code it shows:</div><div class="flex"><input type="text" placeholder="code from Google" style="flex:1" data-ans="colab-code" value="${esc(S.ans["colab-code"] || "")}"><button class="primary" data-act="key-colab" data-op="code">Finish sign-in</button><button data-act="key-colab" data-op="cancel">Cancel</button></div>`;
+  const b = S.busy.has("colab") ? "disabled" : "";
+  // Signed in means installed; the install button is only for a machine without the CLI.
+  return `<div class="flex mt">${r.set ? "" : `<button data-act="key-colab" data-op="install" ${b}>Install Colab CLI</button>`}<button class="${r.set ? "" : "primary"}" data-act="key-colab" data-op="signin" ${b}>${r.set ? "Sign in again" : "Sign in to Google"}</button><button data-act="key-test" data-name="colab" ${b}>Test</button></div>`;
+}
+
+// ── New competition ─────────────────────────────────────────────────────────
+// The /overnight questions as a form: facts first, then compute, budget, sensors,
+// auto-run, what you know and alerts. The draft is saved on the server, so the same
+// setup can be finished here or with /overnight in Claude Code or Cursor.
+const COLAB_PLANS = [["free", "Free"], ["pro", "Pro"], ["pro_plus", "Pro+"], ["payg", "Pay as you go"]];
+const COLAB_GPUS = ["T4", "L4", "G4", "A100", "H100"];
+const gb = v => typeof v === "number" ? (v < 0.1 ? "under 0.1 GB" : v.toFixed(1) + " GB") : "—";
+function drafts() { return allProjects().filter(p => p.overnight && p.overnight.draft && !p.overnight.has_setup && p.role === "primary"); }
+function jobFor(art) { return (S.data.jobs || []).filter(j => j.artifacts_dir === art).slice(-1)[0] || null; }
+function wiz(art, form) { if (!S.wiz[art]) S.wiz[art] = JSON.parse(JSON.stringify(form || {})); return S.wiz[art]; }
+function wget(o, path) { return path.split(".").reduce((a, k) => a == null ? a : a[k], o); }
+function wset(o, path, v) { const ks = path.split("."); let a = o; ks.slice(0, -1).forEach(k => { a[k] = a[k] || {}; a = a[k]; }); a[ks[ks.length - 1]] = v; }
+function wIn(art, path, attrs) { return `<input ${attrs || 'type="text"'} data-wiz="${esc(path)}" data-art="${esc(art)}" value="${esc(wget(S.wiz[art], path) ?? "")}">`; }
+function wSel(art, path, opts) { const v = String(wget(S.wiz[art], path) ?? ""); return `<select data-wiz="${esc(path)}" data-art="${esc(art)}">${opts.map(([k, l]) => `<option value="${esc(k)}" ${String(k) === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`; }
+function wChk(art, path, label) { return `<label class="flex sub"><input type="checkbox" data-wiz="${esc(path)}" data-art="${esc(art)}" ${wget(S.wiz[art], path) ? "checked" : ""}> ${label}</label>`; }
+function jobSteps(job) {
+  return `<div class="mt">${job.steps.map(s => `<div class="flex">${badge(s.status === "ok" ? "ok" : s.status)}<span class="mono" style="font-size:11px">${esc(s.label)}</span></div>${s.output && (s.status !== "ok" || job.status !== "done") ? `<pre class="log">${esc(s.output.split("\n").slice(-30).join("\n"))}</pre>` : ""}`).join("")}</div>`;
+}
+function vNew() {
+  const np = S.data.new_project || {}, b = S.busy.has("new") ? "disabled" : "";
+  let h = `<div class="card mb"><div class="hd title">Start a new competition</div><div class="bd">
+    <div class="sub mb">The same steps as <code>/overnight</code> in Claude Code or Cursor: facts first, then the questions, then setup and the baseline. You can stop half-way and finish in either place.</div>
+    <div class="kv" style="grid-template-columns:150px 1fr"><div>Competition</div><div><input type="text" style="width:100%" placeholder="https://www.kaggle.com/competitions/&lt;slug&gt;" data-ans="new:competition" value="${esc(S.ans["new:competition"] || "")}"></div>
+    <div>Folder</div><div><input type="text" style="width:100%" placeholder="${esc((np.default_root || "") + "/<slug>")}" data-ans="new:root" value="${esc(S.ans["new:root"] || "")}"><div class="dim" style="font-size:11px">Where the project lives; empty = a new folder named after the competition.</div></div></div>
+    <div class="flex mt"><button class="primary" data-act="new-facts" ${b}>${b ? "Starting…" : "Gather facts"}</button><span class="sub">Reads the competition, its leaderboard and notebooks, and checks your compute options (about 30 s).</span></div></div></div>`;
+  const ds = drafts().filter(p => match(p.name));
+  if (!ds.length) return h + `<div class="empty">No setup in progress.</div>`;
+  return h + ds.map(draftCard).join("");
+}
+function draftCard(p) {
+  const o = p.overnight, d = o.draft, art = o.artifacts_dir, job = jobFor(art) || d.job, running = job && job.status === "running";
+  let h = `<div class="card mb"><div class="hd">${badge(running ? "running" : d.status === "setting_up" && job && job.status === "error" ? "error" : "draft")}<span class="title">${esc(d.slug || p.name)}</span><span class="sub mono trunc">${shortPath(art)}</span>
+    <span class="right sub">updated ${when(d.updated_at)}</span></div><div class="bd">`;
+  h += `<div class="sub">Or finish it in Claude Code or Cursor: <code>/overnight ${esc(d.slug || p.name)}</code> — it picks up these answers.</div>`;
+  if (job && (running || job.status === "error")) {
+    h += `<div class="sec">${esc(job.title)} ${badge(job.status === "done" ? "ok" : job.status)}</div>${jobSteps(job)}`;
+    if (job.status === "error") h += `<div class="issue error"><span>⛔</span><div>${esc(job.error)}</div></div>`;
+  }
+  if (running) return h + "</div></div>";
+  if (!d.facts) return h + `<div class="flex mt"><button class="primary" data-act="new-refacts" data-art="${esc(art)}" data-slug="${esc(d.slug)}">Gather facts again</button><button data-act="new-discard" data-art="${esc(art)}">Discard</button></div></div></div>`;
+  return h + wizardForm(art, d) + "</div></div>";
+}
+function computeRows(art, f) {
+  const code = f.is_code_competition, rec = { kaggle_gpu: "kaggle", cpu: "local", colab_gpu: "colab" }[f.recommended_compute] || f.recommended_compute;
+  const why = {
+    local: f.local && (f.local.gpu_name || (f.local.gpu_type === "none" ? "CPU only" : f.local.gpu_type)) + (f.local ? ` · ${f.local.free_disk_gb} GB free, data ${gb(f.data_size_gb)}` : ""),
+    kaggle: f.kaggle_gpu && `${f.kaggle_gpu.quota_hours_remaining ?? "?"} h of GPU quota left this week · data stays on Kaggle`,
+    colab: f.colab && f.colab.reason, ssh: f.ssh && f.ssh.reason, cloud: f.cloud_gpu && f.cloud_gpu.reason,
+  };
+  const pick = wget(S.wiz[art], "compute");
+  return `<div>${(S.data.new_project.computes || []).map(c => `<label class="row" style="padding:5px 0;border:0"><input type="radio" name="cmp-${esc(art)}" data-wiz="compute" data-art="${esc(art)}" value="${c}" ${pick === c ? "checked" : ""} ${code && c !== "kaggle" ? "disabled" : ""}>
+    <b style="white-space:nowrap">${esc(COMPUTE_LABEL[c] || c)}</b>${c === rec ? ' <span class="badge b-green">recommended</span>' : ""}<span class="sub">${esc(why[c] || "")}</span></label>`).join("")}
+    ${rec && f.recommended_reason ? `<div class="dim" style="font-size:11px">Why the recommendation: ${esc(f.recommended_reason)}</div>` : ""}
+    ${code ? '<div class="sub" style="color:var(--amber)">Code competition: only Kaggle notebooks can submit, so Kaggle GPU is the only choice.</div>' : ""}</div>`;
+}
+function wizardForm(art, d) {
+  const f = d.facts, w = wiz(art, d.form), np = S.data.new_project, keys = S.data.keys || [], b = S.busy.has("new:" + art) ? "disabled" : "";
+  const keyOk = n => { const r = keys.find(k => k.name === n); return r && r.set && (!r.test || r.test.ok); };
+  const dirSrc = f.metric_direction_source, unsure = ["guess", "keyword", ""].includes(dirSrc || "");
+  let h = `<div class="sec">What gather-facts found</div><div class="kv">
+    <div>Competition</div><div><b>${esc(f.title || d.slug)}</b>${f.task_type ? ` · ${esc(f.task_type)}` : ""}${f.is_code_competition ? ' · <span class="badge b-amber">code competition</span>' : ""}</div>
+    <div>Metric</div><div>${esc(f.metric || "unknown")} — ${f.metric_direction === "minimize" ? "lower" : "higher"} is better <span class="dim">(from ${esc(dirSrc || "a guess")})</span></div>
+    <div>Deadline</div><div>${f.deadline_hours != null ? `${Math.round(f.deadline_hours / 24)} days left` : "—"} · data ${gb(f.data_size_gb)}</div>
+    <div>Start from</div><div>${f.top_kernel ? `<span class="mono">${esc(f.top_kernel.ref)}</span>${f.top_kernel.lb_score != null ? ` (LB ${esc(f.top_kernel.lb_score)})` : ""}` : "no public notebook found"} · ${(f.starter_notebooks || []).length} starter notebooks · ${f.existing_ideas_count || 0} ideas</div></div>`;
+  h += `<div class="sec">1 · Where experiments run</div>` + computeRows(art, f);
+  if (w.compute === "colab") h += `<div class="flex mt"><span class="sub">plan</span>${wSel(art, "colab.plan", COLAB_PLANS)}<span class="sub">GPU</span>${wSel(art, "colab.gpu", COLAB_GPUS.map(g => [g, g]))}${wChk(art, "colab.high_mem", "high-RAM (Pro/Pro+)")}${keyOk("colab") ? "" : `<a href="${hashOf({ view: "keys", n: "colab" })}">Sign in to Colab →</a>`}</div><div class="dim" style="font-size:11px">Free: T4 only. A100/H100 spend compute units fastest.</div>`;
+  if (w.compute === "ssh") h += `<div class="flex mt"><span class="sub">host</span>${wIn(art, "ssh.host", 'type="text" placeholder="user@server" style="width:220px"')}<span class="sub">key</span>${wIn(art, "ssh.key", 'type="text" placeholder="~/.ssh/id_ed25519 (optional)" style="width:240px"')}</div>`;
+  if (w.compute === "cloud") {
+    const prov = wget(w, "cloud.provider") || "runpod", gl = (S.cloudGpus || {})[prov];
+    h += `<div class="flex mt"><span class="sub">provider</span>${wSel(art, "cloud.provider", np.cloud_providers.map(x => [x, x]))}
+      <span class="sub">GPU</span>${gl ? wSel(art, "cloud.gpu_type", [["", "pick one"], ...gl.map(g => [g.name, `${g.display || g.name} · ${g.memory_gb || "?"} GB · $${(+g.price_per_hr || 0).toFixed(2)}/h`])]) : wIn(art, "cloud.gpu_type", 'type="text" placeholder="GPU type" style="width:180px"')}
+      <button data-act="new-gpus" data-art="${esc(art)}" ${S.busy.has("gpus") ? "disabled" : ""}>List GPUs</button>${prov === "vast" ? `<span class="sub">max $/h</span>${wIn(art, "cloud.max_price", 'type="number" step="0.05" style="width:80px"')}` : ""}
+      ${keyOk(prov) ? "" : `<a href="${hashOf({ view: "keys", n: prov })}">Set the ${esc(prov)} key →</a>`}</div><div class="dim" style="font-size:11px">Billed per hour by the provider. AWS needs a key pair, image and security group — set it up from a chat.</div>`;
+  }
+  h += `<div class="sec">2 · Budget and metric</div><div class="flex"><span class="sub">hours</span>${wIn(art, "time_hours", 'type="number" min="1" max="168" style="width:80px"')}<span class="sub">max experiments</span>${wIn(art, "max_experiments", 'type="number" min="1" max="1000" style="width:80px"')}
+    <span class="sub">better is</span>${wSel(art, "metric_direction", [["maximize", "higher (maximize)"], ["minimize", "lower (minimize)"]])}</div>
+    ${unsure ? `<div class="sub" style="color:var(--amber)">Setup only ${dirSrc ? "inferred" : "guessed"} which way the metric goes — check it.</div>` : ""}`;
+  h += `<div class="sec">3 · Background sensors</div>` + np.sensors.map(s => s.name === "auto_run_sensor" ? "" : `<label class="flex sub" style="margin:3px 0"><input type="checkbox" data-wiz="sensors.${esc(s.name)}" data-art="${esc(art)}" ${wget(w, "sensors." + s.name) ? "checked" : ""}> <span class="mono">${esc(s.name)}</span> — ${esc(s.description)}</label>`).join("");
+  h += `<div class="mt">${wChk(art, "scheduler.on", "Run them as a background service even when no chat is open")}</div>${w.scheduler && w.scheduler.on ? `<div class="flex"><span class="sub">every</span>${wIn(art, "scheduler.interval_hours", 'type="number" min="1" max="48" style="width:70px"')}<span class="sub">hours</span></div>` : ""}`;
+  const drv = wget(w, "auto_run.driver");
+  h += `<div class="sec">4 · Who runs rounds when no chat is open</div>${wChk(art, "sensors.auto_run_sensor", "Run experiments automatically on new ideas (never submits; stops for pauses and questions)")}`;
+  h += `<div class="flex"><span class="sub">driver</span>${wSel(art, "auto_run.driver", [["claude", "Claude Code"], ["cursor", "Cursor agent"], ["byok", "API key"]])}${wget(w, "sensors.auto_run_sensor") ? `<span class="sub">rounds per launch</span>${wIn(art, "auto_run.rounds", 'type="number" min="1" max="20" style="width:60px"')}<span class="sub">per day</span>${wIn(art, "auto_run.daily_max", 'type="number" min="1" max="100" style="width:60px"')}` : ""}
+    <a href="${hashOf({ view: "keys", n: drv === "byok" ? "anthropic" : drv })}">${DRIVER_NAMES[drv]} sign-in →</a></div>
+    <div class="dim" style="font-size:11px">${f.auto_run_driver === drv ? `Suggested: ${esc(f.auto_run_reason || "")}.` : ""} The driver also does the sensors' AI work. Without auto-run, rounds run when you drive them from a chat.</div>`;
+  h += `<div class="sec">5 · What you already know</div><div class="kv" style="grid-template-columns:200px 1fr">
+    <div>Techniques that work</div><div><textarea rows="2" style="width:100%" data-wiz="answers.known_approaches" data-art="${esc(art)}" placeholder="e.g. CoAtNet is the winning backbone">${esc(wget(w, "answers.known_approaches") || "")}</textarea></div>
+    <div>Features that must not be used</div><div>${wIn(art, "answers.forbidden_features", 'type="text" style="width:100%" placeholder="leakage, rules — empty if none"')}</div>
+    <div>External data allowed?</div><div>${wSel(art, "answers.external_data", [["unknown", "not sure"], ["yes", "yes"], ["no", "no"]])}</div></div>`;
+  h += `<div class="sec">6 · Phone alerts</div><div class="flex"><span class="sub">ntfy topic</span>${wIn(art, "ntfy_topic", 'type="text" placeholder="optional — pick something unguessable" style="width:280px"')}</div><div class="dim" style="font-size:11px">Anyone who knows an ntfy.sh topic can read it.</div>`;
+  const need = ["kaggle"].concat(w.compute === "colab" ? ["colab"] : [], w.compute === "cloud" ? [wget(w, "cloud.provider") || "runpod"] : []).filter(n => !keyOk(n));
+  if (need.length) h += issues([{ level: "warn", message: "Set these first: " + need.map(n => (keys.find(k => k.name === n) || {}).label || n).join(", "), hint: "Keys & accounts — setup checks again when you start." }]);
+  h += `<div class="flex mt"><button class="primary" data-act="new-setup" data-art="${esc(art)}" ${b}>${b ? "Starting…" : "Start setup"}</button><button data-act="new-save" data-art="${esc(art)}" ${b}>Save for later</button><button data-act="new-discard" data-art="${esc(art)}" ${b}>Discard</button>
+    <span class="sub">Setup measures the baseline, which can take a while; progress shows here.</span></div>`;
+  return h;
+}
+
+// ── Steer ───────────────────────────────────────────────────────────────────
+// Directions for the proposer, as a thread. "Next round" ones are read by the next
+// prepare-round and closed by the round after; standing ones stay until removed.
+function dirState(d) {
+  if (d.status === "removed") return '<span class="badge b-gray">removed</span>';
+  if (d.kind === "standing") return '<span class="badge b-purple">standing</span>';
+  if (d.status === "applied") return `<span class="badge b-green">applied in R${d.read_by_round}</span>`;
+  if (d.status === "read") return `<span class="badge b-blue">read by R${d.read_by_round}</span>`;
+  return '<span class="badge b-amber">waiting for the next round</span>';
+}
+function vSteer() {
+  const ps = projects().filter(p => p.overnight && p.overnight.has_setup && match(p.name, p.overnight.steering));
+  if (!ps.length) return `<div class="empty">No set-up competition here. Start one under <a href="${hashOf({ view: "new" })}">New competition</a>.</div>`;
+  return `<div class="sub mb">Steer the research the way you would in a chat. A direction reaches whoever proposes the next round — the chat agent through <code>prepare-round</code>, an auto-run launch in its prompt — ahead of the idea ranking, and it answers here. Submissions and repo plans still need their own yes.</div>` + ps.map(steerCard).join("");
+}
+function steerCard(p) {
+  const o = p.overnight, id = p.id, ctl = o.control || {}, b = k => S.busy.has(k + ":" + id) ? "disabled" : "";
+  const items = o.steering || [], showOld = S.open.get("steerold:" + id);
+  const shown = items.filter(d => showOld || d.status !== "removed" && !(d.kind === "next" && d.status === "applied"));
+  let h = `<div class="card mb"><div class="hd">${badge(ctl.paused ? "paused" : p.state)}<span class="title">${esc(p.name)}</span><span class="sub">${o.round_context && o.round_context.round_num ? `next round R${o.round_context.round_num}` : ""}</span>
+    <span class="right flex">${ctl.paused ? `<button data-act="loop" data-op="resume" data-id="${id}" ${b("loop")}>Resume</button>` : `<button data-act="loop" data-op="pause" data-id="${id}" ${b("loop")}>Pause</button>`}
+    <button data-act="loop" data-op="resynthesize" data-id="${id}" ${b("loop")} title="Rebuild the idea pool from the results so far">Re-synthesize now</button></span></div><div class="bd">`;
+  if (ctl.paused) h += issues([{ level: "warn", message: `Paused${ctl.pause_reason ? ": " + ctl.pause_reason : ""}`, hint: "No new rounds start until you resume. Sensors keep running." }]);
+  h += shown.length ? shown.map(d => `<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)">
+      <div class="flex">${dirState(d)}<span class="sub">you · ${when(d.at)}${d.via !== "dashboard" ? ` · from ${esc(d.via)}` : ""}</span>${d.status !== "removed" && d.status !== "applied" ? `<button class="right" data-act="steer-remove" data-id="${id}" data-d="${esc(d.id)}" title="Stop telling the proposer">Remove</button>` : ""}</div>
+      <div style="margin:4px 0;white-space:pre-wrap">${esc(d.text)}</div>
+      ${d.replies.map(r => `<div style="margin:4px 0 0 16px;padding-left:8px;border-left:2px solid ${r.by === "person" ? "var(--accent)" : "var(--green)"}"><span class="sub">${r.by === "person" ? "you" : "proposer"} · ${when(r.at)}</span><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join("")}
+    </div>`).join("") : `<div class="sub">No directions yet.</div>`;
+  if (items.length > shown.length || showOld) h += `<a class="sub" href="#" data-act="steer-old" data-id="${id}">${showOld ? "Hide" : "Show"} applied and removed (${items.length - items.filter(d => d.status !== "removed" && !(d.kind === "next" && d.status === "applied")).length})</a>`;
+  h += `<div class="mt"><textarea rows="2" style="width:100%" placeholder="e.g. Stop tuning LightGBM — try a transformer on the raw sequences next" data-ans="steer:${id}">${esc(S.ans["steer:" + id] || "")}</textarea></div>
+    <div class="flex"><select id="steer-kind-${id}" aria-label="How long it applies"><option value="next">for the next round</option><option value="standing">for every round until removed</option></select>
+    <button class="primary" data-act="steer-add" data-id="${id}" ${b("steer")}>Send direction</button>
+    <span class="sub" style="margin-left:12px">or add one idea to the pool:</span><input type="text" style="flex:1;min-width:180px" placeholder="an idea in one sentence" data-ans="idea:${id}" value="${esc(S.ans["idea:" + id] || "")}"><button data-act="loop" data-op="add-idea" data-id="${id}" ${b("loop")}>Add idea</button></div>`;
+  return h + "</div></div>";
+}
+
+// ── Run configs ─────────────────────────────────────────────────────────────
+// Everything setup asked and everything decided since, per project, editable in place.
+// Each field goes through the same setter as the CLI and lands in the change log.
+const GPU_CHOICE = { cpu: "local", kaggle_gpu: "kaggle", colab_gpu: "colab", ssh_server: "ssh", cloud_gpu: "cloud", competition_gpu: "competition" };
+const COMPUTE_LABEL = { local: "This machine (its GPU if any)", kaggle: "Kaggle GPU (free quota)", colab: "Google Colab", ssh: "Your SSH server", cloud: "Paid cloud GPU", competition: "Competition GPU" };
+function cfgVal(p, field, saved) { const b = S.cfg[p.id] || {}; return field in b ? b[field] : saved; }
+function cfgInput(p, field, saved, attrs = "") {
+  const v = cfgVal(p, field, saved ?? "");
+  return `<input ${attrs} data-cfg="${esc(field)}" data-pid="${p.id}" data-orig="${esc(saved ?? "")}" value="${esc(v)}"${String(v) !== String(saved ?? "") ? ' style="border-color:var(--amber)"' : ""}>`;
+}
+function cfgSelect(p, field, saved, options) {
+  const v = cfgVal(p, field, saved);
+  return `<select data-cfg="${esc(field)}" data-pid="${p.id}" data-orig="${esc(saved)}"${v !== saved ? ' style="border-color:var(--amber)"' : ""}>${options.map(([k, l]) => `<option value="${esc(k)}" ${k === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+}
+// Colab: Google's CLI (installed and signed in from here), the plan, and the GPU it may use.
+function colabRows(p, c, row) {
+  const cb = c.colab, cli = cb.cli || {}, plan = cfgVal(p, "colab_plan", cb.plan);
+  const gpus = cb.plan_gpus[plan] || [], hm = cb.high_mem_plans.includes(plan);
+  let st;
+  if (!cli.installed) st = `<span style="color:var(--amber)">Google's Colab CLI is not installed.</span> <button data-act="colab" data-op="install" data-id="${p.id}" ${S.busy.has("colab") ? "disabled" : ""}>Install</button>`;
+  else if (cli.signed_in === false) st = S.colabUrl
+    ? `<div>1. <a href="${esc(S.colabUrl)}" target="_blank" rel="noopener">Open Google's sign-in</a> and approve. 2. Paste the code it shows:</div><div class="flex"><input type="text" id="colab-code" placeholder="code from Google" style="flex:1" data-ans="colab-code" value="${esc(S.ans["colab-code"] || "")}"><button class="primary" data-act="colab" data-op="code" data-id="${p.id}">Finish sign-in</button><button data-act="colab" data-op="cancel" data-id="${p.id}">Cancel</button></div>`
+    : `<span style="color:var(--amber)">Not signed in to Colab.</span> <button class="primary" data-act="colab" data-op="signin" data-id="${p.id}" ${S.busy.has("colab") ? "disabled" : ""}>Sign in</button>`;
+  else if (cli.signed_in) st = `✅ Signed in${cli.account ? " as " + esc(cli.account) : ""}${cb.usage && cb.usage.balance ? ` · balance ${esc(cb.usage.balance)}${cb.usage.rate ? " · " + esc(cb.usage.rate) : ""}` : ""}`;
+  else st = "installed — save Colab as compute to check the sign-in";
+  let h = row("Colab", st, "Each round runs on a fresh Colab VM: the data is downloaded there with your Kaggle key, the round runs in the background and is checked every minute (a dropped connection does not stop it), and the VM is released when it ends or hits the round time limit.");
+  h += row("Colab plan", cfgSelect(p, "colab_plan", cb.plan, cb.plans), plan === "enterprise" ? '<span style="color:var(--amber)">Colab Enterprise is not supported yet — rounds need regular Colab.</span>' : "The plan decides which GPUs and machine shapes rounds may ask for.");
+  h += row("GPU", gpus.length ? cfgSelect(p, "colab_gpu", gpus.includes(cb.gpu) ? cb.gpu : gpus[0], gpus.map(g => [g, g])) : '<span class="dim">—</span>', plan === "free" ? "Free Colab gives a T4 when one is available; larger GPUs spend compute units." : "A100 and H100 spend compute units fastest.");
+  h += row("High-RAM machine", hm ? cfgSelect(p, "colab_high_mem", String(!!cb.high_mem), [["false", "no"], ["true", "yes"]]) : '<span class="dim">needs Colab Pro or Pro+</span>');
+  return h;
+}
+// Phone alerts: where they go, how to subscribe, a test button, and what each level sends.
+const ALERT_WHERE = { env: "the NTFY_TOPIC environment variable", project: "this project's topic", machine: "the machine-wide topic" };
+function newTopic(p) {
+  const b = new Uint8Array(5); crypto.getRandomValues(b);
+  return `rf-${(p.name || "kaggle").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 16).replace(/-+$/, "")}-${[...b].map(x => x.toString(16).padStart(2, "0")).join("")}`;
+}
+function notifyRows(p, c, row) {
+  const n = c.notify || {}, level = cfgVal(p, "notification_level", c.notification_level);
+  let h = row("Phone alerts", n.topic
+    ? `✅ Sent to ntfy topic <code>${esc(n.topic)}</code> <span class="dim">(${esc(ALERT_WHERE[n.where] || n.where)})</span>`
+    : '<span style="color:var(--amber)">No topic set, so no alerts are sent.</span> Set one below.');
+  const t = n.topic ? `<code>${esc(n.topic)}</code>` : "your topic";
+  h += row("How to subscribe", `<ol class="sub" style="margin:0 0 0 16px;padding:0">
+    <li>Install the free <b>ntfy</b> app (App Store or Google Play), or open ${n.subscribe_url ? `<a href="${esc(n.subscribe_url)}" target="_blank" rel="noopener">${esc(n.subscribe_url)}</a>` : "ntfy.sh/&lt;topic&gt;"} in a browser.</li>
+    <li>In the app tap <b>+</b> → Subscribe to topic, enter ${t}${n.server && n.server !== "https://ntfy.sh" ? `, and set the server to <code>${esc(n.server)}</code>` : " (server ntfy.sh)"}.</li>
+    <li>Press <b>Send test alert</b> and check that it arrives.</li></ol>`,
+    `From a terminal, the same: <code>researchforge notify setup --topic &lt;topic&gt;</code> sets the machine-wide topic and sends a test; <code>researchforge notify test</code> tests it again.`);
+  h += row("Test", `<button data-act="notify-test" data-id="${p.id}" ${!n.topic || S.busy.has("ntest:" + p.id) ? "disabled" : ""}>Send test alert</button>`);
+  h += row("Level", cfgSelect(p, "notification_level", c.notification_level, c.notification_levels.map(x => [x, x])),
+    n.level_sends && n.level_sends[level] ? `Sends: ${esc(n.level_sends[level].join(", "))}.` : "");
+  h += row("Submission policy", cfgSelect(p, "submission_policy", c.submission_policy, c.submission_policies.map(x => [x, x])), "ResearchForge never submits by itself; this sets when it offers.");
+  h += row("This project's topic", `<div class="flex">${cfgInput(p, "ntfy_topic", c.ntfy_topic, 'type="text" placeholder="blank = machine-wide topic" style="width:260px"')}<button data-act="topic-new" data-id="${p.id}" data-field="ntfy_topic" title="Fill in a random, unguessable topic">New topic</button></div>`,
+    "Anyone who knows a topic name can read it — keep it unguessable.");
+  h += row("Machine-wide topic", `<div class="flex">${cfgInput(p, "ntfy_machine_topic", n.machine_topic, 'type="text" placeholder="not set" style="width:260px"')}<button data-act="topic-new" data-id="${p.id}" data-field="ntfy_machine_topic" title="Fill in a random, unguessable topic">New topic</button></div>`,
+    "Used by every project that has no topic of its own.");
+  return h;
+}
+function vConfigs() {
+  const ps = projects().filter(p => p.role === "primary" && p.overnight && match(p.name, p.root));
+  if (!ps.length) return `<div class="empty">No Kaggle project here. Repository and research projects keep their settings in their contract: <code>researchforge contract show</code>.</div>`;
+  return `<div class="sub mb">Changes apply from the next round, launch or proposal; a round already running keeps its settings. Each one is logged with when and where it was made.</div>` + ps.map(configCard).join("");
+}
+function configCard(p) {
+  const c = p.overnight.run_config, ar = p.overnight.auto_run || {};
+  if (!c || c.error) return `<div class="issue error"><span>⛔</span><div>${esc(p.name)}: ${esc((c && c.error) || "no configuration")}</div></div>`;
+  const dirty = Object.keys(S.cfg[p.id] || {}).length;
+  const row = (label, control, note = "") => `<tr><td class="sub" style="width:220px">${label}</td><td>${control}${note ? `<div class="dim" style="font-size:11px">${note}</div>` : ""}</td></tr>`;
+  const sec = t => `<tr><td colspan="2" class="sec" style="padding-top:12px">${t}</td></tr>`;
+  const compute = GPU_CHOICE[c.compute.value] || c.compute.value;
+  let h = `<details class="card mb" ${det("cfg:" + p.id, true)}><summary><span class="title">${esc(p.name)}</span><span class="sub mono trunc">${shortPath(p.location)}</span><span class="right sub">${dirty ? `<span style="color:var(--amber)">${plural(dirty, "unsaved change")}</span>` : "saved"}</span></summary><div class="bd"><div class="tbl"><table><tbody>`;
+  h += sec("Where it runs");
+  h += row("Compute", cfgSelect(p, "compute", compute, c.compute.choices.map(k => [k, COMPUTE_LABEL[k] || k])),
+    c.compute.data_location ? `Data policy: data stays at <b>${esc(c.compute.data_location)}</b>${c.compute.local_allowed ? "" : " — this machine is refused"}` : "");
+  if (cfgVal(p, "compute", compute) === "colab") h += colabRows(p, c, row);
+  h += row("Kaggle GPU runs per day", cfgInput(p, "kaggle_gpu_daily_cap", c.kaggle_gpu_daily_cap, 'type="number" min="0" style="width:90px"'), "0 = no cap");
+  h += sec("Who runs it");
+  h += row("Driver", cfgSelect(p, "driver", c.driver, Object.keys(ar.drivers || DRIVER_NAMES).filter(k => k !== "manual").map(k => [k, DRIVER_NAMES[k] + (ar.drivers && ar.drivers[k] && ar.drivers[k].ready ? " ✓" : "")])),
+    `Setup steps and sign-in for each driver are in <a href="${hashOf({ view: "automation", p: p.id })}">Automation</a>.`);
+  h += sec(`Auto-run ${ar.enabled ? '<span class="badge b-green">on</span>' : '<span class="badge b-gray">off</span>'}`);
+  h += row("Rounds per launch", cfgInput(p, "auto_run_rounds_per_launch", c.auto_run.rounds_per_launch, 'type="number" min="1" max="20" style="width:90px"'));
+  h += row("Most rounds per day", cfgInput(p, "auto_run_max_rounds_per_day", c.auto_run.max_rounds_per_day, 'type="number" min="1" max="100" style="width:90px"'));
+  h += row("Stop a launch after (min)", cfgInput(p, "auto_run_max_minutes", c.auto_run.max_minutes, 'type="number" min="10" max="1440" style="width:90px"'));
+  h += sec("The metric");
+  h += row("Name", `<span class="mono">${esc(c.metric.name || "—")}</span>`);
+  h += row("Better is", cfgSelect(p, "metric_direction", c.metric.direction, [["maximize", "higher (maximize)"], ["minimize", "lower (minimize)"]]), c.metric.source ? `from: ${esc(c.metric.source)}` : "");
+  h += row("Baseline", `<span class="mono">${c.baseline != null ? fmtM(c.baseline) : "not measured"}</span>${c.baseline_kernel ? ` <span class="dim">${esc(c.baseline_kernel)}</span>` : ""}`, "Fixed at setup — rerun setup with --refresh to change it.");
+  h += sec("Budget");
+  h += row("Time budget (hours)", cfgInput(p, "time_budget_hours", c.time_budget_hours, 'type="number" min="1" max="168" style="width:90px"'));
+  h += row("Max experiments", cfgInput(p, "max_experiments", c.max_experiments, 'type="number" min="1" max="1000" style="width:90px"'));
+  h += row("Round time limit (min)", cfgInput(p, "round_time_limit_minutes", c.round_time_limit_minutes, 'type="number" min="5" max="1440" style="width:90px"'),
+    "How long one round's full run may take before it is stopped. Colab rounds keep running on the VM through a dropped connection until this limit.");
+  h += sec("What you told setup");
+  h += (c.answers.length ? c.answers.map(a => row(esc(a.question || a.key.replace(/_/g, " ")), cfgInput(p, "answer:" + a.key, a.value, 'type="text" style="width:100%"'))).join("") : row("—", '<span class="dim">no answers recorded</span>'));
+  h += row("Add a note for proposals", `<div class="flex"><input type="text" id="cfg-newk-${p.id}" placeholder="topic, e.g. external_data" style="width:180px"><input type="text" id="cfg-newv-${p.id}" placeholder="what you know" style="flex:1"><button data-act="cfg-add" data-id="${p.id}">Add</button></div>`);
+  h += sec("Notifications");
+  h += notifyRows(p, c, row);
+  h += `</tbody></table></div><div class="flex mt"><button class="primary" data-act="cfg-save" data-id="${p.id}" ${!dirty || S.busy.has("cfg:" + p.id) ? "disabled" : ""}>Save ${dirty ? plural(dirty, "change") : ""}</button>${dirty ? `<button data-act="cfg-reset" data-id="${p.id}">Discard</button>` : ""}<span class="sub">Sensors are switched in <a href="${hashOf({ view: "automation", p: p.id })}">Automation</a>.</span></div>`;
+  if (c.changes.length) h += `<details class="mt" ${det("cfglog:" + p.id, false)}><summary class="sub" style="cursor:pointer">Change log (${c.changes.length})</summary><div class="tbl"><table><tbody>${c.changes.map(x =>
+    `<tr><td class="sub">${when(x.at)}</td><td class="mono">${esc(x.field)}</td><td class="mono">${esc(String(x.from ?? ""))} → ${esc(String(x.to ?? ""))}</td><td class="sub">${esc(x.via)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  return h + `</div></details>`;
+}
+
+// ── Questions (bell + Home) ─────────────────────────────────────────────────
+const CATEGORY = { kaggle: "Kaggle competitions", research: "Research ideas", repository: "Repository improvements" };
+function questionsOf(ps) { return ps.filter(p => p.role === "primary").flatMap(p => (p.questions || []).map(q => ({ p, q }))); }
+function isNewQ(q) { return !!q.asked_at && q.asked_at > S.qSeen; }
+function byCategory(items, key) {
+  const out = {};
+  items.forEach(x => { const c = key(x) || "repository"; (out[c] = out[c] || []).push(x); });
+  return Object.keys(CATEGORY).filter(c => out[c]).map(c => [c, out[c]]);
+}
+// Kaggle's daily submission allowance: its reply to our last submission today, else
+// the competition's daily limit minus today's submissions.
+function dailyLeft(p) {
+  const d = p.submissions && p.submissions.daily;
+  if (!d) return "";
+  return d.max ? `${d.remaining} of ${d.max} submissions left today` : `${plural(d.remaining, "submission")} left today`;
+}
+function dailyNote(p) {
+  const d = p.submissions && p.submissions.daily;
+  if (!d) return "";
+  const resets = new Date(d.resets_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.remaining > 0
+    ? `<div class="sub" style="margin:2px 0 4px">${dailyLeft(p)} on Kaggle (resets ${esc(resets)})</div>`
+    : `<div class="sub" style="margin:2px 0 4px;color:var(--amber)">Kaggle's daily limit is used up${d.after_round ? ` (0 left after R${esc(d.after_round)})` : ""}. Approving now is refused; it resets at ${esc(resets)}.</div>`;
+}
+function questionCard(p, q, pre = "qa") {
+  const k = `${p.id}:${q.where}:${q.id}`, busy = S.busy.has("q:" + k);
+  const meta = [q.source && `asked by ${esc(q.source)}`, q.asked_at && when(q.asked_at), q.holds_loop && q.kind !== "plan_approval" ? '<span style="color:var(--amber)">loop on hold</span>' : "",
+    q.blocks && q.blocks.length && q.kind !== "plan_approval" ? `${plural(q.blocks.length, "idea")} waiting` : ""].filter(Boolean).join(" · ");
+  const x = q.answerable ? `<button class="right" style="padding:0 7px" data-act="q-dismiss" data-id="${p.id}" data-where="${q.where}" data-q="${esc(q.id)}" ${busy ? "disabled" : ""} title="Dismiss: close it without answering; the ideas it blocked run again" aria-label="Dismiss question">✕</button>` : "";
+  let h = `<div class="qcard"><div class="sub flex">${isNewQ(q) ? '<span class="new" title="new"></span>' : ""}<span><b>${esc(p.name)}</b>${meta ? " · " + meta : ""}</span>${x}</div><div class="q">${esc(q.question)}</div>`;
+  if (q.kind === "submission_approval") h += dailyNote(p);
+  const ck = "c:" + k, comment = `<input type="text" id="${pre}-c-${esc(k)}" data-ans="${esc(ck)}" value="${esc(S.ans[ck] || "")}" placeholder="Add a comment (optional) — the next proposal reads it" style="width:100%;margin:4px 0" aria-label="Comment">`;
+  if (q.approvable) {
+    if (q.approach) h += `<div class="sub" style="margin-bottom:4px">${esc(q.approach)}</div>`;
+    if (q.experiments && q.experiments.length) h += `<ul class="sub" style="margin:0 0 6px 16px;padding:0">${q.experiments.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+    h += comment + `<div class="flex"><button class="primary" data-act="plan-decide" data-decision="approve" data-id="${p.id}" data-plan="${esc(q.id)}" data-k="${esc(k)}" data-pre="${pre}" data-n="${(q.experiments || []).length}" ${busy ? "disabled" : ""}>Approve plan</button><button data-act="plan-decide" data-decision="reject" data-id="${p.id}" data-plan="${esc(q.id)}" data-k="${esc(k)}" data-pre="${pre}" ${busy ? "disabled" : ""}>Reject</button><span class="dim" style="font-size:11px">or in a terminal: <code>${esc(q.command)}</code></span></div>`;
+  }
+  else if (!q.answerable) h += `<div class="sub">Approve in your terminal: <code>${esc(q.command)}</code></div>`;
+  else if (q.options && q.options.length) h += comment;
+  if (!q.answerable) { /* plan approvals are handled above */ }
+  else if (q.options && q.options.length) {
+    const acts = q.actions || {}, changes = o => Object.entries(acts[o] || {}).map(([f, v]) => `${f} → ${v}`).join(", ");
+    h += `<div class="flex">${q.options.map(o => `<button data-act="q-answer" data-id="${p.id}" data-where="${q.where}" data-q="${esc(q.id)}" data-kind="${esc(q.kind)}" data-val="${esc(o)}" data-changes="${esc(changes(o))}" ${acts[o] ? `title="Also changes Run configs: ${esc(changes(o))}"` : ""} ${busy ? "disabled" : ""} class="${o === q.default ? "primary" : ""}">${acts[o] ? "⚙ " : ""}${esc(q.kind === "submission_approval" ? ({ yes: "Approve & submit", no: "Don't submit" }[o] || o) : o)}</button>`).join("")}</div>`;
+    h += q.options.filter(o => acts[o]).map(o => `<div class="sub" style="margin-top:3px">⚙ <b>${esc(o)}</b> changes Run configs: ${esc(changes(o))}</div>`).join("");
+  }
+  else h += `<div class="flex"><input type="text" id="${pre}-${esc(k)}" data-ans="${esc(k)}" value="${esc(S.ans[k] ?? q.default ?? "")}" placeholder="Your answer" style="flex:1;min-width:180px" aria-label="Answer"><button class="primary" data-act="q-send" data-id="${p.id}" data-where="${q.where}" data-q="${esc(q.id)}" data-kind="${esc(q.kind)}" data-pre="${pre}" ${busy ? "disabled" : ""}>Send</button></div>`;
+  if (q.answerable && !(q.options && q.options.length)) h += comment;
+  if (q.answerable) h += `<div class="dim" style="font-size:11px">or in a terminal: <code>${esc(q.command)}</code></div>`;
+  return h + `</div>`;
+}
+// Questions grouped by project, one collapsible section each, so a long list stays readable.
+function questionsHtml(items, empty, pre = "qa") {
+  if (!items.length) return `<div class="empty">${empty}</div>`;
+  const only = new Set(items.map(x => x.p.id)).size === 1;
+  return byCategory(items, x => x.p.category).map(([c, list]) => {
+    const groups = new Map();
+    list.forEach(x => { if (!groups.has(x.p.id)) groups.set(x.p.id, []); groups.get(x.p.id).push(x); });
+    return `<div class="grp">${CATEGORY[c]} · ${list.length}</div>${[...groups.values()].map(g => questionGroup(g, pre, only)).join("")}`;
+  }).join("");
+}
+function questionGroup(g, pre, only) {
+  const p = g[0].p, key = `${pre}:${p.id}`, open = only || S.qOpen.has(key);
+  const offers = g.filter(x => x.q.kind === "submission_approval").length, others = g.length - offers;
+  const fresh = g.some(x => isNewQ(x.q)), left = offers ? dailyLeft(p) : "";
+  const bits = [others && plural(others, "question"), offers && plural(offers, "submission offer"), left].filter(Boolean).join(" · ");
+  const head = only ? "" : `<button class="qhead" data-act="q-group" data-key="${esc(key)}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span>${fresh ? '<span class="new" title="new"></span>' : ""}<b>${esc(p.name)}</b><span class="sub">${esc(bits)}</span></button>`;
+  return head + (open ? g.map(({ q }) => questionCard(p, q, pre)).join("") : "");
+}
+function renderInbox() {
+  const items = questionsOf(allProjects()), fresh = items.filter(x => isNewQ(x.q)).length;
+  const n = document.getElementById("bell-n");
+  n.hidden = !items.length; n.textContent = items.length; n.className = "n" + (fresh ? "" : " old");
+  document.getElementById("bell").title = items.length ? `${plural(items.length, "question")} waiting for you${fresh ? ` (${fresh} new)` : ""}` : "No questions waiting";
+  const box = document.getElementById("inbox");
+  box.hidden = !S.inboxOpen;
+  const typing = document.activeElement && document.activeElement.tagName === "INPUT" && document.activeElement.dataset.ans;
+  if (!S.inboxOpen || typing) return;  // never wipe a half-typed answer
+  box.innerHTML = `<div class="hd title" style="padding:10px 12px">Questions for you <span class="sub">answering one lets its ideas run again</span><button class="right" data-act="bell" aria-label="Close">✕</button></div>` + questionsHtml(items, "Nothing is waiting for you.");
+}
+
+// ── Home ───────────────────────────────────────────────────────────────────
+function nextSteps(p) {
+  const out = [], o = p.overnight, r = p.repo;
+  p.issues.filter(i => i.level === "error").forEach(i => out.push({ c: "var(--red)", h: `${esc(i.message)}${i.hint ? ` — <span class="dim">${esc(i.hint)}</span>` : ""}` }));
+  p.experiments.filter(e => e.status === "running").forEach(e => out.push({ c: "var(--amber)", h: `<b>${esc(e.id)}</b> running${e.stage ? ` (${esc(e.stage)})` : ""} since ${when(e.started_at)}: ${esc(e.title)}` }));
+  const qs = p.questions || [], held = qs.filter(q => q.holds_loop);
+  if (qs.length) out.push({ c: "var(--amber)", h: `${held.length ? "Loop <b>on hold</b> until you answer" : `<b>${plural(qs.length, "question")}</b> for you`} — <a href="#" data-act="bell">answer in 🔔</a>: ${esc((held[0] || qs[0]).question)}` });
+  p.experiments.filter(e => e.status === "stale").slice(0, 1).forEach(e => out.push({ c: "var(--amber)", h: `<b>${esc(e.id)}</b> stalled: ${esc(e.reason || "no progress")}` }));
+  (p.merge_candidates || []).slice(0, 1).forEach(m => out.push({ c: "var(--accent)", h: `Merge candidate <b>${m.parents.map(esc).join(" + ")}</b> — ${m.command ? `<code>${esc(m.command)}</code>` : `next <code>researchforge kaggle prepare-round ${esc(p.slug)}</code> proposes it`}` }));
+  if (o && o.pending_proposal) out.push({ c: "var(--accent)", h: `Proposal <b>${esc(o.pending_proposal.title)}</b> is written — run <code>researchforge kaggle execute-round ${esc(p.slug)}</code>` });
+  const untested = p.hypotheses.filter(h => !h.tested && !["rejected", "draft"].includes(h.status));
+  const confRank = { high: 0, medium: 1, low: 2 };
+  untested.sort((a, b) => (a.priority ?? 5) - (b.priority ?? 5) || (confRank[a.confidence] ?? 3) - (confRank[b.confidence] ?? 3));
+  if (untested.length) out.push({ c: "var(--green)", h: `Next idea (${plural(untested.length, "untested hypothesis")}): <span style="color:var(--cyan)">${esc(untested[0].title)}</span>` });
+  if (r && r.next_action) out.push({ c: "var(--purple)", h: `Next: <code>${esc(r.next_action.split("#")[0].trim())}</code>` });
+  if (o && o.has_setup && p.scheduler && p.scheduler.state === "not_installed")
+    out.push({ c: "var(--amber)", h: `No background watcher. <button data-act="sched" data-id="${p.id}" data-on="1">Install scheduler</button>` });
+  return out;
+}
+function vHome() {
+  const ps = projects(), t = S.data.totals;
+  const live = ps.filter(p => p.role === "primary");
+  const sum = f => live.reduce((a, p) => a + f(p), 0);
+  const tiles = [
+    ["Projects", live.length, "var(--accent)", `${live.filter(p => ACTIVE.includes(p.state)).length} active · ${live.filter(p => ["paused", "waiting", "stalled"].includes(p.state)).length} need attention`],
+    ["Running now", sum(p => p.experiments.filter(e => e.status === "running").length), "var(--amber)", "in-flight experiments"],
+    ["Experiments", sum(p => p.experiments.length), "var(--green)", `${sum(p => p.experiments.filter(e => e.status === "improved").length)} improved`],
+    ["Ideas waiting", sum(p => p.hypotheses.filter(h => !h.tested && !["rejected"].includes(h.status)).length), "var(--purple)", `${sum(p => p.hypotheses.length)} hypotheses total`],
+    ["Watchers live", sum(p => p.scheduler && p.scheduler.live ? 1 : 0), "var(--cyan)",
+      (n => n ? `${n} failing` : "launchd monitors")(sum(p => p.scheduler && p.scheduler.state === "failing" && p.scheduler.targets_this_dir ? 1 : 0))],
+  ];
+  let h = `<div class="grid g4 mb">${tiles.map(([l, v, c, s]) => `<div class="card stat"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div><div class="dim" style="font-size:11px">${esc(s)}</div></div>`).join("")}</div>`;
+  const qs = questionsOf(ps).filter(x => match(x.p.name, x.q.question));
+  if (qs.length) {
+    const fresh = qs.filter(x => isNewQ(x.q)).length;
+    h += `<div class="card mb"><div class="hd title">Questions for you <span class="sub">${plural(qs.length, "question")}${fresh ? ` · <span style="color:var(--red)">${fresh} new</span>` : ""} — answering one lets its ideas run again</span></div>${questionsHtml(qs, "", "qh")}</div>`;
+  }
+
+  const steps = [];
+  live.filter(p => S.route.p !== "all" || ACTIVE.includes(p.state) || p.issues.some(i => i.level === "error"))
+    .forEach(p => nextSteps(p).forEach(s => steps.push({ p, ...s })));
+  const urgency = { "var(--red)": 0, "var(--amber)": 1, "var(--accent)": 2 };
+  steps.sort((a, b) => (urgency[a.c] ?? 3) - (urgency[b.c] ?? 3));
+  h += `<div class="grid g2">`;
+  h += `<div class="card"><div class="hd title">What to do next</div><div>${steps.filter(s => match(s.p.name, s.h)).slice(0, 10).map(s =>
+    `<div class="row"><span style="color:${s.c}">→</span><div><a href="${hashOf({ view: "home", p: s.p.id })}"><b>${esc(s.p.name)}</b></a>: ${s.h}</div></div>`).join("") ||
+    '<div class="empty">Nothing pending for active projects.</div>'}</div></div>`;
+  const events = mergeEvents(live, 40);
+  const now = localNow();
+  h += `<div class="card"><div class="hd title">Recent activity <a class="right sub" href="${hashOf({ view: "timeline", p: S.route.p })}">Timeline →</a></div><div>${events.filter(x => x.e.ts <= now && match(x.p.name, x.e.title, x.e.detail)).slice(0, 12).map(({ p, e }) =>
+    `<div class="row"><span class="badge b-gray">${esc(e.kind)}</span><div class="trunc" style="flex:1"><b>${esc(p.name)}</b> · ${esc(e.title)}<div class="dim trunc">${esc(e.detail)}</div></div><span class="dim">${when(e.ts)}</span></div>`).join("") ||
+    '<div class="empty">No recorded events yet.</div>'}</div></div></div>`;
+
+  const cards = ps.filter(p => match(p.name, p.root, p.kinds, p.state, CATEGORY[p.category]));
+  if (!cards.length) h += `<div class="sec">Projects</div><div class="empty">No project matches “${esc(S.route.q)}”.</div>`;
+  for (const [c, list] of byCategory(cards, p => p.category)) {
+    h += `<div class="sec">${CATEGORY[c]} <span class="sub">${list.length}</span></div><div class="grid g2">${list.map(projectCard).join("")}</div>`;
+  }
+  h += discoveryPanel();
+  return h;
+}
+function projectCard(p) {
+  const exps = p.experiments, imp = exps.filter(e => e.status === "improved").length;
+  const untested = p.hypotheses.filter(h => !h.tested && h.status !== "rejected").length;
+  const s = p.scheduler;
+  const sched = s ? `${badge(s.state)}${s.installed && !s.targets_this_dir ? ' <span class="dim">(other dir)</span>' : ""}` : '<span class="dim">no scheduler (repo project)</span>';
+  const dl = p.overnight && p.overnight.competition.deadline;
+  return `<div class="card"><div class="hd">${badge(p.state)}<a class="title trunc" href="${hashOf({ view: S.route.view, p: p.id })}">${esc(p.name)}</a><span class="right">${kindBadges(p)}</span></div>
+    <div class="bd"><div class="sub mono trunc" title="${esc(p.location)}">${shortPath(p.location)}</div>
+    <div class="grid g4 mt" style="grid-template-columns:repeat(4,1fr);gap:6px;text-align:center">
+      <a href="${hashOf({ view: "runs", p: p.id })}"><div class="v" style="font-size:18px;font-weight:700">${exps.length}</div><div class="dim">runs</div></a>
+      <a href="${hashOf({ view: "dag", p: p.id })}"><div class="v" style="font-size:18px;font-weight:700;color:var(--green)">${imp}</div><div class="dim">improved</div></a>
+      <a href="${hashOf({ view: "hypotheses", p: p.id })}"><div class="v" style="font-size:18px;font-weight:700;color:var(--cyan)">${untested}</div><div class="dim">ideas</div></a>
+      <div><div class="v mono" style="font-size:14px;font-weight:700;color:var(--accent);padding-top:3px">${p.best ? fmtM(p.best.metric) : "—"}</div><div class="dim">best${p.best ? " " + esc(p.best.id) : ""}</div>${dirTag(p)}</div>
+    </div>
+    <div class="flex mt sub">Scheduler: ${sched}<span class="right">active ${when(p.last_activity_at)}</span></div>
+    ${p.overnight && p.overnight.sensors && p.overnight.sensors.next_cycle_at ? `<div class="sub">Next sensor cycle: ${when(p.overnight.sensors.next_cycle_at)}${p.overnight.sensors.monitor_alive ? "" : ' <span class="dim">(monitor not running)</span>'}</div>` : ""}
+    ${dl ? `<div class="sub">⏳ Deadline: <b>${esc(countdown(dl))}</b> <span class="dim">(${esc(dl.slice(0, 10))})</span></div>` : ""}
+    ${issues(p.issues, ["error", "warn"])}</div></div>`;
+}
+function discoveryPanel() {
+  const d = S.data.discovery;
+  return `<details class="card mt" ${det("discovery", false)}><summary><span class="title">Workspace discovery</span><span class="sub">${plural(d.locations_found, "location")} from ${plural(d.scan_roots.length, "root")} · depth ${d.scan_depth}</span></summary><div class="bd">
+    <div class="kv"><div>Started in</div><div class="mono">${shortPath(d.cwd)}</div><div>Scan roots</div><div class="mono">${d.scan_roots.map(shortPath).join("<br>")}</div>
+    <div>Registry</div><div class="mono">${shortPath(d.registry_path)}</div>
+    <div>Missing paths</div><div class="mono">${d.missing_registered_paths.length ? d.missing_registered_paths.map(shortPath).join("<br>") : "none"}</div>
+    <div>Scan errors</div><div class="mono">${d.errors.length ? d.errors.map(esc).join("<br>") : "none"}</div>
+    <div>Hidden</div><div class="mono">${(d.hidden_roots || []).length ? d.hidden_roots.map(shortPath).join("<br>") : "none"}</div></div>
+    <div class="dim mt">Add more roots in <code>~/.config/researchforge/dashboard.json</code> → <code>{"scan_roots": ["~/code"]}</code> or <code>RESEARCHFORGE_SCAN_ROOTS</code>. Hide a project with <code>{"hidden_roots": ["~/path/to/project"]}</code>; its files stay where they are.</div>
+    <div class="dim">${S.data.gpu_quota.note}</div></div></details>`;
+}
+
+// ── Automation ─────────────────────────────────────────────────────────────
+const SCHED_TEXT = {
+  not_installed: "No launchd job for this competition. Sensors only run when you run the monitor manually.",
+  installed_not_loaded: "A plist exists but launchd has not loaded it.",
+  running: "Loaded and running — the monitor process is alive.",
+  idle: "Loaded; waiting for its next interval (last exit 0).",
+  failing: "Loaded but the last run failed.",
+};
+function vAutomation() {
+  const ps = projects().filter(p => p.overnight);
+  const repoOnly = projects().filter(p => !p.overnight && p.repo);
+  let h = `<div class="sub mb">Each switch calls the real CLI: the scheduler switch runs <code>researchforge kaggle scheduler-install/uninstall</code> (launchd); sensor switches write <code>scheduler_config.json</code>, which the monitor re-reads every cycle. Status comes from <code>monitor_state.json</code> and <code>launchctl</code>.</div>`;
+  if (!ps.length) h += `<div class="empty">No Kaggle overnight projects in this selection.</div>`;
+  const shown = ps.filter(p => match(p.name, p.root, p.overnight.sensors.items, p.scheduler));
+  h += shown.map(p => automationCard(p, shown.length === 1)).join("");
+  if (repoOnly.length) h += `<div class="sec">Repo projects</div>` + repoOnly.filter(p => match(p.name)).map(p => repoAutoCard(p, shown.length + repoOnly.length === 1)).join("");
+  return h;
+}
+// Repo auto-run: `researchforge auto-run` — the same unattended machinery as a competition's.
+function repoAutoCard(p, single) {
+  const ra = p.repo.auto_run, eng = p.repo.autorun;
+  if (!ra || ra.error) return `<div class="card mb"><div class="hd">${badge(p.state)}<span class="title">${esc(p.name)}</span></div><div class="bd"><div class="issue error"><span>⛔</span><div>Auto-run: ${esc(ra ? ra.error : "no status")}</div></div></div></div>`;
+  const c = ra.config, sv = ra.service, id = p.id, busy = k => S.busy.has(k + ":" + id) ? "disabled" : "";
+  const pick = S.drv[id] || c.driver, info = ra.drivers[pick] || {}, dirty = pick !== c.driver;
+  const glance = [`auto-run ${ra.enabled ? badge("on") : badge("off")}`, `service ${sv.installed && sv.loaded ? badge("ok") : badge("off")}`, ra.standing ? "standing approval" : "asks for each plan"];
+  let h = `<details class="card mb" ${det("rauto:" + id, single || !!ra.running || ra.plans_waiting.length > 0)}><summary>${badge(p.state)}<span class="title">${esc(p.name)}</span><span class="sub mono trunc">${shortPath(p.root)}</span><span class="right sub">${glance.join(" · ")}</span></summary><div class="bd">`;
+  // Service: the background monitor that starts launches when the gates allow.
+  h += `<div class="flex mb"><button data-act="ra" data-op="monitor" data-id="${id}" ${busy("ra-monitor")}>Run monitor once</button>
+    <label class="toggle" title="Install / remove the background service"><input type="checkbox" aria-label="Background service for ${esc(p.name)}" data-act="ra-service" data-id="${id}" ${sv.installed ? "checked" : ""} ${busy("ra-service")}><span></span></label><span class="sub">background service — a monitor cycle every ${c.poll_minutes} min (<span class="mono">${esc(sv.label)}</span>)</span></div>`;
+  if (sv.installed && !sv.loaded) h += `<div class="issue warn"><span>⚠️</span><div>The service is installed but not loaded; switch it off and on to reload it.</div></div>`;
+  const mon = ra.monitor;
+  h += `<div class="sub mb">${mon.last_cycle_at ? `Last cycle ${when(mon.last_cycle_at)}${mon.next_cycle_at ? ` · next ${when(mon.next_cycle_at)}` : ""}` : "The monitor has not run here yet."}${sv.last_exit_status ? ` · last exit ${sv.last_exit_status}` : ""}</div>`;
+  if (sv.log_tail && sv.log_tail.length) h += `<details ${det("ralog:" + id, false)}><summary class="sub" style="cursor:pointer">Service log (${esc(shortPath(sv.log_path))})</summary><pre class="log">${esc(sv.log_tail.join("\n"))}</pre></details>`;
+  // Driver
+  h += `<div class="sec">Driver <span class="sub">the AI that writes plans and new hypotheses — the engine imports, runs and measures them</span></div>`;
+  h += `<div class="flex mb"><select data-act="drv-pick" data-id="${id}" aria-label="Driver">${Object.keys(ra.drivers).map(d => `<option value="${d}" ${d === pick ? "selected" : ""}>${esc(DRIVER_NAMES[d])}${ra.drivers[d].ready ? " ✓" : ""}</option>`).join("")}</select>
+    <input type="text" id="ra-model-${id}" placeholder="model (optional)" value="${esc(dirty ? "" : c.model)}" style="width:170px" aria-label="Model">
+    <button class="${dirty ? "primary" : ""}" data-act="ra-driver" data-id="${id}" ${busy("ra-settings")}>${dirty ? `Switch to ${esc(DRIVER_NAMES[pick])}` : "Save"}</button></div>`;
+  h += `<div class="sub">${info.ready ? `✅ ${esc(DRIVER_NAMES[pick])} ready — ${esc(info.detail)}` : `<span style="color:var(--amber)">⚠️ ${esc(DRIVER_NAMES[pick])} not ready — ${esc(info.detail || "")}</span>`}</div>`;
+  if (!info.ready) h += `<ol class="sub" style="margin:4px 0 4px 18px;padding:0">${(info.steps || []).filter(x => !x.startsWith("Limits")).map(x => `<li class="mono" style="font-size:11px">${esc(x)}</li>`).join("")}</ol>`;
+  // Auto-run
+  h += `<div class="sec">Auto-run ${ra.enabled ? '<span class="badge b-green">on</span>' : '<span class="badge b-gray">off</span>'} <span class="sub">rounds of the DAG loop on this repository — plan, run, measure, re-synthesize</span></div>`;
+  h += `<div class="flex mb"><label class="toggle"><input type="checkbox" aria-label="Auto-run on" data-act="ra-enabled" data-id="${id}" ${ra.enabled ? "checked" : ""} ${busy("ra-settings")}><span></span></label><span class="sub">${ra.enabled ? "on" : "off"}</span>
+    <span class="sub">rounds per launch</span><input type="number" id="ra-rnd-${id}" min="1" max="20" value="${c.rounds_per_launch}" style="width:58px" aria-label="Rounds per launch">
+    <span class="sub">max per day</span><input type="number" id="ra-day-${id}" min="1" max="100" value="${c.max_rounds_per_day}" style="width:58px" aria-label="Max rounds per day">
+    <span class="sub">limit (min)</span><input type="number" id="ra-min-${id}" min="10" max="1440" value="${c.max_minutes}" style="width:66px" aria-label="Launch time limit in minutes">
+    <span class="sub">monitor every (min)</span><input type="number" id="ra-poll-${id}" min="5" max="1440" value="${c.poll_minutes}" style="width:58px" aria-label="Monitor interval minutes"></div>
+    <div class="flex mb"><label class="sub" title="Combine two independent improvements when the graph has them"><input type="checkbox" id="ra-merge-${id}" ${c.merge ? "checked" : ""}> merge winners</label>
+    <label class="sub" title="When the local metric is only a signal: keep every result and reject only on hard constraints"><input type="checkbox" id="ra-nogate-${id}" ${c.metric_gate ? "" : "checked"}> record every result</label>
+    <button data-act="ra-save" data-id="${id}" ${busy("ra-settings")}>Save</button>
+    ${ra.running ? `<button data-act="ra" data-op="stop" data-id="${id}" ${busy("ra-stop")}>Stop launch</button>` : `<button class="primary" data-act="ra" data-op="start" data-id="${id}" ${busy("ra-start")} title="Start one launch now, through the same checks">Start now</button>`}
+    ${ra.paused ? `<button data-act="ra" data-op="resume" data-id="${id}" ${busy("ra-resume")}>Resume</button>` : `<button data-act="ra" data-op="pause" data-id="${id}" ${busy("ra-pause")}>Pause</button>`}</div>`;
+  // Approval
+  h += `<div class="sub mb"><b>Approval:</b> ${ra.standing ? `standing approval since ${when(c.standing_approved_at)} — plans run without asking. <button data-act="ra-approval" data-mode="ask" data-id="${id}" ${busy("ra-approval")}>Ask before every plan</button>` : `each plan waits for <b>Approve plan</b> in the 🔔 and a phone alert; the next launch runs it. <button data-act="ra-approval" data-mode="standing" data-id="${id}" ${busy("ra-approval")}>Give standing approval…</button>`}</div>`;
+  h += `<div class="sub">${ra.gates.length ? "Waiting: " + esc(ra.gates.join("; ")) : "Checks clear — the next monitor cycle starts a launch."} · ${ra.rounds_today} round(s) today</div>`;
+  if (ra.plans_waiting.length) h += `<div class="sub">Plans waiting for you: ${ra.plans_waiting.map(w => `<b>${esc(w.plan_id)}</b> (${plural(w.experiments.length, "experiment")})`).join(", ")} — approve or reject them in the 🔔.</div>`;
+  if (ra.running) h += `<div class="sub">Running: ${badge("running")} ${esc(DRIVER_NAMES[ra.running.driver])} since ${when(ra.running.started_at)} · pid ${ra.running.pid}</div>`;
+  if (ra.last) h += `<div class="sub">Last launch: ${badge(ra.last.status === "finished" ? "ok" : ra.last.status === "stopped" ? "cancelled" : "error")} ${esc(ra.last.status)} ${when(ra.last.finished_at)} · ${ra.last.rounds_run || 0} round(s)${ra.last.best ? " · " + esc(ra.last.best) : ""}${ra.last.error && ra.last.status !== "stopped" ? ` · <span style="color:var(--red)">${esc(ra.last.error)}</span>` : ""}</div>`;
+  if (eng) h += `<div class="dim" style="font-size:11px">Terminal loop (researchforge autorun): ${esc(eng.status || "")} ${esc(eng.stop_reason || "")} · ${eng.rounds_completed ?? 0} rounds · ${when(eng.updated_at)}</div>`;
+  // Notifications
+  h += `<div class="sec">Notifications</div><div class="flex mb"><span class="sub">ntfy topic</span><input type="text" id="ra-topic-${id}" placeholder="${esc(ra.notify_topic_source === "machine" ? ra.notify_topic + " (machine-wide)" : "a topic only you know")}" value="${esc(c.ntfy_topic)}" style="width:220px" aria-label="ntfy topic"><button data-act="ra-topic" data-id="${id}" ${busy("ra-settings")}>Save</button>
+    <span class="sub">${ra.notify_topic ? `alerts go to <span class="mono">${esc(ra.notify_topic)}</span> (${esc(ra.notify_topic_source)})` : "no topic set — nothing is sent"}</span></div>`;
+  h += `<div class="dim" style="font-size:11px">Plans waiting, results, a launch that fails or hits a usage limit, new papers and a daily summary at ${esc(c.briefing_at || "—")} go there. Subscribe in the ntfy app.</div>`;
+  // Sensors
+  h += `<div class="sec">Monitor</div><div class="tbl"><table><thead><tr><th>Check</th><th>Status</th><th>Last run</th><th>Detail</th></tr></thead><tbody>`;
+  h += mon.sensors.map(x => `<tr><td><div>${esc(x.name)}</div><div class="dim" style="font-size:11px">${esc(x.description)}</div></td><td>${badge(x.status || "pending")}</td><td>${when(x.last_run_at)}</td><td class="sub">${esc(x.detail || "")}</td></tr>`).join("");
+  h += `</tbody></table></div><div class="dim mt" style="font-size:11px">Never runs a plan you have not approved (unless you gave a standing approval), never ships or opens a PR. Log: <code>${esc(shortPath(ra.log))}</code> · CLI: <code>researchforge auto-run status</code></div>`;
+  h += `</div></details>`;
+  return h;
+}
+// Driver: who runs this project's rounds and sensors unattended. Picking one shows
+// its setup steps at once; Save makes it the project's driver from the next launch.
+function driverPanel(p) {
+  const ar = p.overnight.auto_run;
+  if (!ar || ar.error) return ar && ar.error ? `<div class="issue error"><span>⛔</span><div>Driver: ${esc(ar.error)}</div></div>` : "";
+  const c = ar.config, pick = S.drv[p.id] || c.driver, info = ar.drivers[pick] || {}, dirty = pick !== c.driver;
+  let h = `<div class="sec">Driver <span class="sub">who runs rounds and sensors when no chat is open — switch any time</span></div>`;
+  h += `<div class="flex mb"><select data-act="drv-pick" data-id="${p.id}" aria-label="Driver">${Object.keys(ar.drivers).map(d => `<option value="${d}" ${d === pick ? "selected" : ""}>${esc(DRIVER_NAMES[d])}${ar.drivers[d].ready ? " ✓" : ""}</option>`).join("")}</select>
+    <input type="text" id="drv-model-${p.id}" placeholder="model (optional)" value="${esc(dirty ? "" : c.model)}" style="width:170px" aria-label="Model">
+    <label class="sub" title="Notebook ideas, arXiv scans and re-synthesis use this driver instead of an API key"><input type="checkbox" id="drv-sens-${p.id}" ${c.route_sensors ? "checked" : ""} ${pick === "byok" ? "disabled" : ""}> sensors use it too</label>
+    <button class="${dirty ? "primary" : ""}" data-act="drv-save" data-id="${p.id}" ${S.busy.has("drv:" + p.id) ? "disabled" : ""}>${dirty ? `Switch to ${esc(DRIVER_NAMES[pick])}` : "Save"}</button></div>`;
+  h += `<div class="sub">${info.ready ? `✅ ${esc(DRIVER_NAMES[pick])} ready — ${esc(info.detail)}` : `<span style="color:var(--amber)">⚠️ ${esc(DRIVER_NAMES[pick])} not ready — ${esc(info.detail || "")}</span>`}</div>`;
+  h += `<ol class="sub" style="margin:4px 0 4px 18px;padding:0">${(info.steps || []).map(x => `<li class="mono" style="font-size:11px">${esc(x)}</li>`).join("")}</ol>`;
+  if (ar.suggested) h += `<div class="dim" style="font-size:11px">${ar.suggested.driver === c.driver ? "Matches how this project was set up" : `Setup suggested ${esc(DRIVER_NAMES[ar.suggested.driver] || ar.suggested.driver)}`} — ${esc(ar.suggested.reason)}</div>`;
+  if (dirty && ar.running) h += `<div class="sub">The ${esc(DRIVER_NAMES[ar.running.driver])} launch now running finishes first; the next one uses ${esc(DRIVER_NAMES[pick])}.</div>`;
+  h += `<div class="dim" style="font-size:11px">Tokens and keys for unattended runs are saved to <code>${esc(ar.env_file)}</code> (mode 600) from <a href="${hashOf({ view: "keys", n: pick === "byok" ? "anthropic" : pick })}">Keys &amp; accounts</a>, or by <code>researchforge kaggle driver-login ${esc(pick)}</code> in your own terminal.</div>`;
+  return h;
+}
+// Auto-run: rounds on untested ideas with the project's driver, its checks and last launch.
+function autoRunPanel(p) {
+  const ar = p.overnight.auto_run;
+  if (!ar || ar.error) return "";
+  const c = ar.config, r = ar.readiness;
+  let h = `<div class="sec">Auto-run ${ar.enabled ? '<span class="badge b-green">on</span>' : '<span class="badge b-gray">off</span>'} <span class="sub">${ar.enabled ? "turn off" : "turn on"} with the auto_run_sensor toggle above · driver: ${esc(DRIVER_NAMES[c.driver])}</span></div>`;
+  h += `<div class="flex mb"><span class="sub">rounds per launch</span><input type="number" id="ar-rnd-${p.id}" min="1" max="20" value="${c.rounds_per_launch}" style="width:58px" aria-label="Rounds per launch">
+    <span class="sub">max per day</span><input type="number" id="ar-day-${p.id}" min="1" max="100" value="${c.max_rounds_per_day}" style="width:58px" aria-label="Max rounds per day">
+    <button data-act="ar-save" data-id="${p.id}" ${S.busy.has("ar:" + p.id) ? "disabled" : ""}>Save</button>
+    ${ar.running ? `<button data-act="ar-stop" data-id="${p.id}" ${S.busy.has("arstop:" + p.id) ? "disabled" : ""}>Stop launch</button>` : `<button class="primary" data-act="ar-start" data-id="${p.id}" ${S.busy.has("arstart:" + p.id) ? "disabled" : ""} title="Start one launch now, through the same checks">Start now</button>`}</div>`;
+  const next = !ar.enabled ? "turn auto-run on and the next monitor cycle starts a launch" : !r.ready ? `a launch starts once ${DRIVER_NAMES[c.driver]} is ready (see Driver above)` : "the next monitor cycle starts a launch";
+  h += `<div class="sub">${ar.gates.length ? "Waiting: " + esc(ar.gates.join("; ")) : `Checks clear — ${esc(next)}.`} · ${ar.rounds_today} round(s) today</div>`;
+  if (ar.running) h += `<div class="sub">Running: ${badge("running")} ${esc(DRIVER_NAMES[ar.running.driver])} since ${when(ar.running.started_at)} · pid ${ar.running.pid}</div>`;
+  if (ar.last) h += `<div class="sub">Last launch: ${badge(ar.last.status === "finished" ? "ok" : ar.last.status === "stopped" ? "cancelled" : "error")} ${esc(ar.last.status)} ${when(ar.last.finished_at)} · ${esc(DRIVER_NAMES[ar.last.driver] || ar.last.driver || "")} · ${ar.last.rounds_run || 0} round(s)${ar.last.error && ar.last.status !== "stopped" ? ` · <span style="color:var(--red)">${esc(ar.last.error)}</span>` : ""}</div>`;
+  h += `<div class="dim" style="font-size:11px">Never submits to Kaggle. Stops for pauses and open questions. Log: <code>${esc(shortPath(ar.log))}</code></div>`;
+  return h;
+}
+function automationCard(p, single) {
+  const s = p.scheduler, o = p.overnight, sn = o.sensors;
+  const on = s.installed && s.loaded && s.targets_this_dir;
+  const bk = "sched:" + p.id;
+  const interval = s.interval_hours || o.watcher.interval_hours || 6;
+  // Controls live in the body: a click inside <summary> would also toggle the card.
+  const failing = s.state === "failing" || sn.items.some(x => x.enabled && x.status === "error");
+  const glance = [`scheduler ${badge(s.state)}`];
+  if (sn.has_state) glance.push(`last cycle ${when(sn.last_cycle_at)}${sn.next_cycle_at ? ` · next ${when(sn.next_cycle_at)}` : ""}`);
+  glance.push(plural(sn.items.filter(x => x.enabled).length, "sensor") + " on");
+  let h = `<details class="card mb" ${det("auto:" + p.id, single || failing)}><summary>${badge(p.state)}<span class="title">${esc(p.name)}</span><span class="sub mono trunc">${shortPath(p.location)}</span><span class="right sub">${glance.join(" · ")}</span></summary><div class="bd">
+    <div class="flex mb"><button data-act="monitor" data-id="${p.id}" ${S.busy.has("mon:" + p.id) ? "disabled" : ""}>${S.busy.has("mon:" + p.id) ? "Running…" : "Run monitor once"}</button>
+    <span class="sub">every</span><input type="number" min="1" max="48" step="1" value="${interval}" style="width:58px" id="int-${p.id}" aria-label="Interval hours"><span class="sub">h</span>
+    <label class="toggle" title="Install / remove the launchd scheduler"><input type="checkbox" aria-label="launchd scheduler for ${esc(p.name)}" data-act="sched-toggle" data-id="${p.id}" ${on ? "checked" : ""} ${S.busy.has(bk) ? "disabled" : ""}><span></span></label><span class="sub">launchd scheduler</span></div>`;
+  h += `<div class="flex">Scheduler ${badge(s.state)} <span class="sub">${esc(SCHED_TEXT[s.state] || "")}</span></div>`;
+  const facts = [];
+  if (s.pid) facts.push(`PID ${s.pid}`);
+  if (s.last_exit_status !== null && s.last_exit_status !== undefined) facts.push(`last exit ${s.last_exit_status}`);
+  if (s.interval_hours) facts.push(`interval ${s.interval_hours}h`);
+  if (facts.length) h += `<div class="sub">${facts.join(" · ")} · <span class="mono">${esc(s.label)}</span></div>`;
+  if (s.installed && !s.targets_this_dir) h += `<div class="issue warn"><span>⚠️</span><div>${esc(s.note || "The launchd job targets a different directory.")} Enabling here re-installs it for this directory.</div></div>`;
+  if (s.last_error && (s.state === "failing" || s.state === "installed_not_loaded")) h += `<div class="issue error"><span>⛔</span><div class="mono">${esc(s.last_error)}</div></div>`;
+  if (s.log_tail && s.log_tail.length) h += `<details ${det("log:" + p.id, false)}><summary class="sub" style="cursor:pointer">Scheduler log (${shortPath(s.log_path)})</summary><pre class="log">${esc(s.log_tail.join("\n"))}</pre></details>`;
+
+  h += driverPanel(p);
+  h += `<div class="sec">Sensors</div>`;
+  if (!sn.has_state) h += `<div class="issue info"><span>ℹ️</span><div>No sensor state recorded in this directory — the monitor has never run here. Use <b>Run monitor once</b> or install the scheduler.</div></div>`;
+  else if (sn.legacy_state) h += `<div class="issue warn"><span>⚠️</span><div>This state was written by an older monitor: timestamps only, no per-sensor status. The next monitor cycle records real status.</div></div>`;
+  const overdue = sn.next_cycle_at && sn.next_cycle_at < localNow();
+  if (overdue) h += `<div class="issue warn"><span>⚠️</span><div>The monitor's next cycle was due ${when(sn.next_cycle_at)} and has not run — usually because the Mac was asleep or the monitor stopped. The monitor runs an overdue cycle within a minute of waking; <b>Run monitor once</b> runs it now.</div></div>`;
+  if (sn.has_state) h += `<div class="sub mb">Last cycle ${when(sn.last_cycle_at)}${sn.next_cycle_at ? ` · next ${overdue ? '<span style="color:var(--amber)">overdue</span> (' + when(sn.next_cycle_at) + ")" : when(sn.next_cycle_at)}` : ""}${sn.monitor_pid ? ` · monitor PID ${sn.monitor_pid} ${sn.monitor_alive ? badge("running") : '<span class="dim">(not alive)</span>'}` : ""}${sn.config_file ? "" : ' · <span class="dim">using default sensor config</span>'}</div>`;
+  h += `<div class="tbl"><table><thead><tr><th style="width:44px">On</th><th>Sensor</th><th>Status</th><th>Last run</th><th>Detail</th><th></th></tr></thead><tbody>`;
+  h += sn.items.filter(x => match(x.name, x.description, x.detail, x.error, p.name) || match(p.name)).map(x => {
+    const k = `sensor:${p.id}:${x.name}`;
+    return `<tr><td><label class="toggle"><input type="checkbox" aria-label="${esc(x.name)} enabled" data-act="sensor-toggle" data-id="${p.id}" data-name="${esc(x.name)}" ${x.enabled ? "checked" : ""} ${S.busy.has(k) ? "disabled" : ""}><span></span></label></td>
+      <td><div>${esc(x.name)}</div><div class="dim" style="font-size:11px">${esc(x.kind)} — ${esc(x.description)}</div></td>
+      <td>${badge(x.enabled ? x.status : "disabled")}</td><td>${when(x.last_run_at)}</td>
+      <td class="sub">${x.error ? `<span style="color:var(--red)">${esc(x.error)}</span>` : esc(x.detail)}</td>
+      <td>${x.custom ? `<button data-act="sensor-remove" data-id="${p.id}" data-name="${esc(x.name)}">Remove</button>` : ""}</td></tr>`;
+  }).join("");
+  h += `</tbody></table></div>`;
+  h += autoRunPanel(p);
+  h += `<details class="mt" ${det("addsensor:" + p.id, false)}><summary class="sub" style="cursor:pointer">+ Add custom sensor</summary>
+    <div class="flex mt"><input type="text" id="sn-name-${p.id}" placeholder="name (a-z0-9_-)" style="width:160px">
+    <input type="text" id="sn-cmd-${p.id}" placeholder="shell command run in the project root; exit 0 = healthy" style="flex:1;min-width:220px">
+    <input type="number" id="sn-to-${p.id}" value="120" min="5" max="3600" style="width:70px" title="timeout seconds">
+    <button class="primary" data-act="sensor-add" data-id="${p.id}">Add</button></div></details>`;
+  h += `</div></details>`;
+  return h;
+}
+
+// ── Runs ───────────────────────────────────────────────────────────────────
+// Rounds the person archived: out of every view and never "best"; restorable here.
+function archivedRuns() {
+  const rows = projects().flatMap(p => ((p.overnight && p.overnight.archived_experiments) || []).map(e => ({ p, e })));
+  if (!rows.length) return "";
+  return `<details class="card mt" ${det("archived-runs", false)}><summary class="hd title">Archived <span class="sub">${plural(rows.length, "round")} — hidden from views, merges and "best"</span></summary><div class="tbl"><table><tbody>${rows.map(({ p, e }) =>
+    `<tr><td class="trunc" style="max-width:180px">${esc(p.name)}</td><td class="mono">${esc(e.id)}</td><td class="trunc">${esc(e.title)}</td><td class="mono">${fmtM(e.metric)}</td>
+      <td><button data-act="round" data-op="restore" data-id="${p.id}" data-round="${e.num}">Restore</button> <button data-act="round" data-op="delete" data-id="${p.id}" data-round="${e.num}">Delete forever</button></td></tr>`).join("")}</tbody></table></div></details>`;
+}
+function vRuns() {
+  const rows = [];
+  projects().forEach(p => p.experiments.forEach(e => rows.push({ p, e })));
+  rows.sort((a, b) => (b.e.started_at || "").localeCompare(a.e.started_at || ""));
+  const f = rows.filter(({ p, e }) => match(p.name, e.id, e.title, e.status, e.branch, e.reason));
+  if (!rows.length) return emptyFor("experiments");
+  const multi = projects().length > 1;
+  return `<div class="card"><div class="tbl"><table><thead><tr>${multi ? "<th>Project</th>" : ""}<th>Run</th><th>Title</th><th>Status</th><th>Stage</th><th>Metric</th><th>Δ baseline</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
+    ${f.slice(0, 500).map(({ p, e }) => `<tr class="click" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}">${multi ? `<td class="trunc" style="max-width:180px">${esc(p.name)}</td>` : ""}
+      <td class="mono">${esc(e.id)}${p.best && p.best.id === e.id ? " ★" : ""}${e.driver ? `<div class="dim" style="font-size:11px" title="driver that ran this round">${esc(DRIVER_NAMES[e.driver] || e.driver)}${e.auto_run ? " · auto" : ""}</div>` : ""}</td><td class="trunc" title="${esc(e.title)}">${esc(e.title)}${e.reason && e.status !== "improved" ? `<div class="dim trunc">${esc(e.reason)}</div>` : ""}</td>
+      <td>${badge(e.status)}</td><td class="sub">${esc(e.stage || "—")}</td><td class="mono">${fmtM(e.metric)}</td><td class="mono">${delta(e) || '<span class="dim">—</span>'}</td>
+      <td class="sub">${when(e.started_at)}</td><td class="sub">${dur(e.duration_s)}</td>
+      <td>${e.source === "overnight" && e.status !== "running" ? `<button data-act="round" data-op="archive" data-id="${p.id}" data-round="${e.num}" title="Hide it everywhere; never a parent or best. Reversible.">Archive</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
+    ${f.length > 500 ? `<div class="sub bd">Showing 500 of ${f.length}.</div>` : ""}${!f.length ? `<div class="empty">No run matches “${esc(S.route.q)}”.</div>` : ""}</div>${archivedRuns()}`;
+}
+function emptyFor(what) {
+  const ps = projects();
+  const notes = ps.flatMap(p => p.issues.filter(i => i.level !== "info" || /no (experiments|hypotheses|pending)/.test(i.message)).map(i => ({ p, i }))).slice(0, 8);
+  return `<div class="card"><div class="empty">No ${what} in ${S.route.p === "all" ? "any discovered project" : "this project"}.</div>
+    ${notes.length ? `<div class="bd">${notes.map(({ p, i }) => `<div class="sub"><b>${esc(p.name)}</b></div>${issues([i])}`).join("")}</div>` : ""}</div>`;
+}
+
+// ── DAG ────────────────────────────────────────────────────────────────────
+const NODE = { w: 210, h: 58, gx: 56, gy: 14 }, MAX_MERGE_EDGES = 8;
+function nodeColors(e, isBest) {
+  if (isBest) return ["#1e3a8a", "#3b82f6", "#93c5fd"];
+  switch (e.status) {
+    case "improved": return ["#14532d", "#22c55e", "#86efac"];
+    case "failed": return ["#450a0a", "#ef4444", "#fca5a5"];
+    case "unscored": return ["#2e1065", "#a78bfa", "#ddd6fe"];
+    case "running": return ["#422006", "#f59e0b", "#fcd34d"];
+    case "planned": return ["#0f1a2e", "#3b82f6", "#93c5fd"];
+    case "stale": case "cancelled": return ["#1a1f2b", "#475569", "#64748b"];
+    default: return typeof e.metric === "number" ? ["#164e63", "#06b6d4", "#a5f3fc"] : ["#1e2535", "#475569", "#94a3b8"];
+  }
+}
+function layout(exps) {
+  const map = new Map(exps.map(e => [e.id, e])), depth = new Map();
+  const d = (e, seen) => {
+    if (depth.has(e.id)) return depth.get(e.id);
+    if (seen.has(e.id)) return 1;
+    seen.add(e.id);
+    const ps = e.parents.filter(x => map.has(x));
+    const v = ps.length ? Math.max(...ps.map(x => d(map.get(x), seen))) + 1 : 1;
+    seen.delete(e.id); depth.set(e.id, v); return v;
+  };
+  exps.forEach(e => d(e, new Set()));
+  const cols = new Map();
+  exps.forEach(e => { const k = depth.get(e.id); if (!cols.has(k)) cols.set(k, []); cols.get(k).push(e); });
+  const pos = new Map([["__root", { c: 0, r: 0 }]]);
+  const maxCol = Math.max(0, ...cols.keys());
+  let maxRows = 1;
+  for (let c = 1; c <= maxCol; c++) {
+    const list = cols.get(c) || [];
+    // Barycentre ordering keeps children next to their parents.
+    const bc = e => { const ps = e.parents.filter(x => pos.has(x)); return ps.length ? ps.reduce((a, x) => a + pos.get(x).r, 0) / ps.length : 0; };
+    list.sort((a, b) => bc(a) - bc(b) || a.num - b.num);
+    list.forEach((e, i) => pos.set(e.id, { c, r: i }));
+    maxRows = Math.max(maxRows, list.length);
+  }
+  const edges = [];
+  exps.forEach(e => {
+    const ps = e.parents.filter(x => map.has(x));
+    if (ps.length) ps.forEach(x => edges.push([x, e.id]));
+    else edges.push(["__root", e.id]);
+  });
+  return { pos, edges, maxCol, maxRows, missing: exps.filter(e => e.parents.some(x => !map.has(x))) };
+}
+function dagSvg(p, exps, source) {
+  const L = layout(exps), sel = S.route.n;
+  const W = (L.maxCol + 1) * (NODE.w + NODE.gx) + 140, H = L.maxRows * (NODE.h + NODE.gy) + 20;
+  const xy = id => { const q = L.pos.get(id); return [10 + q.c * (NODE.w + NODE.gx), 10 + q.r * (NODE.h + NODE.gy)]; };
+  let edges = "", nodes = "";
+  L.edges.forEach(([a, b]) => {
+    const [x1, y1] = xy(a), [x2, y2] = xy(b);
+    const sx = x1 + NODE.w, sy = y1 + NODE.h / 2, tx = x2, ty = y2 + NODE.h / 2, mx = (sx + tx) / 2;
+    const hot = sel && (sel === a || sel === b);
+    edges += `<path d="M${sx},${sy} C${mx},${sy} ${mx},${ty} ${tx - 4},${ty}" fill="none" stroke="${hot ? "#60a5fa" : "#3b4658"}" stroke-width="${hot ? 2 : 1.4}" marker-end="url(#arr)"/>`;
+  });
+  // Merge candidates (engine rule): dashed arc between the two parents.
+  const ids = new Set(exps.map(e => e.id));
+  (p.merge_candidates || []).filter(m => m.parents.every(x => ids.has(x))).slice(0, MAX_MERGE_EDGES).forEach(m => {
+    const [x1, y1] = xy(m.parents[0]), [x2, y2] = xy(m.parents[1]);
+    const sx = x1 + NODE.w, sy = y1 + NODE.h / 2 + 6, tx = x2 + NODE.w, ty = y2 + NODE.h / 2 + 6;
+    const bulge = 30 + Math.min(90, Math.abs(ty - sy) / 3);
+    edges += `<path d="M${sx},${sy} C${Math.max(sx, tx) + bulge},${sy} ${Math.max(sx, tx) + bulge},${ty} ${tx},${ty}" fill="none" stroke="#a78bfa" stroke-width="1.6" stroke-dasharray="5 4"><title>merge candidate: ${esc(m.parents.join(" + "))}</title></path>`;
+  });
+  const bl = exps.find(e => typeof e.baseline === "number");
+  const [rx, ry] = xy("__root");
+  nodes += `<g><rect x="${rx}" y="${ry}" width="${NODE.w}" height="${NODE.h}" rx="8" fill="#111827" stroke="#64748b" stroke-dasharray="4 3"/>
+    <text x="${rx + 10}" y="${ry + 20}" fill="#e2e8f0" font-size="12" font-weight="700">Baseline</text>
+    <text x="${rx + 10}" y="${ry + 38}" fill="#94a3b8" font-size="11">${bl ? "metric " + fmtM(bl.baseline) : "no baseline metric recorded"}</text>
+    <text x="${rx + 10}" y="${ry + 52}" fill="#64748b" font-size="10">${source === "repo" ? "repo project" : "overnight"}</text></g>`;
+  exps.forEach(e => {
+    const [x, y] = xy(e.id), isBest = p.best && p.best.id === e.id;
+    const [fill, stroke, mc] = nodeColors(e, isBest);
+    const t = e.title.length > 30 ? e.title.slice(0, 29) + "…" : e.title;
+    const on = sel === e.id;
+    nodes += `<g class="node" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}"><title>${esc(e.id + ": " + e.title + " — " + e.status)}</title>
+      <rect x="${x}" y="${y}" width="${NODE.w}" height="${NODE.h}" rx="8" fill="${fill}" stroke="${on ? "#f8fafc" : stroke}" stroke-width="${on ? 2.5 : 1.5}"${e.status === "stale" ? ' stroke-dasharray="4 3"' : e.imported ? ' stroke-dasharray="2 3"' : ""}${e.status === "running" ? ' class="pulse"' : ""}/>
+      <text x="${x + 10}" y="${y + 17}" fill="#fff" font-size="12" font-weight="700">${esc(e.id)}${isBest ? " ★" : ""}${e.is_merge ? " ⑂" : ""}</text>
+      <text x="${x + NODE.w - 10}" y="${y + 17}" fill="${mc}" font-size="12" font-weight="600" text-anchor="end">${fmtM(e.metric)}</text>
+      <text x="${x + 10}" y="${y + 34}" fill="#cbd5e1" font-size="11">${esc(t)}</text>
+      <text x="${x + 10}" y="${y + 50}" fill="#64748b" font-size="10">${esc(e.status)}${e.stage ? " · " + esc(e.stage) : ""}${e.branch ? " · " + esc(e.branch.slice(0, 14)) : ""}</text></g>`;
+  });
+  return { svg: `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#64748b"/></marker></defs>${edges}${nodes}</svg>`, missing: L.missing };
+}
+function nodeDetail(p, e) {
+  const children = p.experiments.filter(x => x.parents.includes(e.id));
+  const hyps = p.hypotheses.filter(h => e.hypothesis_ids.includes(h.id) || h.tested_by.includes(e.id));
+  const link = id => `<a href="${hashOf({ view: "dag", p: p.id, n: id })}" class="mono">${esc(id)}</a>`;
+  const pr = e.proposal || {}, merges = (p.merge_candidates || []).filter(m => m.parents.includes(e.id));
+  return `<div class="card mt"><div class="hd">${badge(e.status)}<span class="title">${esc(e.id)} — ${esc(e.title)}</span><a class="right sub" href="${hashOf({ view: "dag", p: p.id })}">close ✕</a></div><div class="bd kv">
+    <div>Metric</div><div class="mono">${fmtM(e.metric)} ${delta(e)} ${e.stage ? `<span class="dim">(${esc(e.stage)})</span>` : ""}</div>
+    <div>Baseline</div><div class="mono">${fmtM(e.baseline)}</div>
+    <div>Parents</div><div>${e.parents.length ? e.parents.map(link).join(", ") : "baseline"}</div>
+    <div>Children</div><div>${children.length ? children.map(c => link(c.id)).join(", ") : "—"}</div>
+    <div>Hypothesis</div><div>${hyps.length ? hyps.map(h => `<a href="${hashOf({ view: "hypotheses", p: p.id, q: h.title.slice(0, 40) })}">${esc(h.title)}</a>`).join("<br>") : '<span class="dim">no linked hypothesis recorded</span>'}</div>
+    <div>Branch / plan</div><div class="mono">${esc(e.branch || "—")}</div>
+    ${e.credit ? `<div>Credit</div><div>${esc(e.credit)}</div>` : ""}
+    <div>Started</div><div>${esc(e.started_at || "—")} (${when(e.started_at)})</div>
+    <div>Completed</div><div>${esc(e.completed_at || "—")}</div>
+    <div>Duration</div><div>${dur(e.duration_s)}</div>
+    ${e.reason ? `<div>Decision</div><div>${esc(e.reason)}</div>` : ""}
+    ${e.executions && e.executions.length ? `<div>Executions</div><div>${e.executions.map(x => `${esc(x.stage)} ${badge(x.status === "succeeded" ? "ok" : x.status === "running" ? "running" : "error", x.status)} ${fmtM(x.metric)}`).join("<br>")}</div>` : ""}
+    ${pr.description ? `<div>Change</div><div>${esc(pr.description)}</div>` : ""}
+    ${pr.rationale ? `<div>Rationale</div><div>${esc(pr.rationale)}</div>` : ""}
+    ${pr.expected_impact ? `<div>Expected</div><div>${esc(pr.expected_impact)}</div>` : ""}
+    ${pr.changed_files && pr.changed_files.length ? `<div>Files</div><div class="mono">${pr.changed_files.map(esc).join("<br>")}</div>` : ""}
+    ${pr.observation ? `<div>Observation</div><div>${esc(pr.observation)}</div>` : ""}
+    ${typeof e.tokens === "number" ? `<div>Proposal tokens</div><div class="mono">${e.tokens.toLocaleString()}</div>` : ""}
+    ${merges.length ? `<div>Merge with</div><div>${merges.map(m => `${link(m.parents.find(x => x !== e.id))}${m.command ? ` <code class="sub">${esc(m.command)}</code>` : ""}`).join("<br>")}</div>` : ""}
+  </div>
+  ${e.patch ? `<details class="bd" data-key="patch:${esc(p.id)}:${esc(e.id)}"${isOpen(`patch:${p.id}:${e.id}`, false) ? " open" : ""}><summary class="sub" style="cursor:pointer">Patch (${e.patch.split("\n").length} lines${e.patch_truncated ? ", truncated" : ""})</summary><pre class="log">${esc(e.patch)}</pre></details>` : '<div class="bd dim">No patch text recorded for this node.</div>'}
+  </div>`;
+}
+function vDag() {
+  const ps = projects().filter(p => p.experiments.length);
+  const none = projects().filter(p => !p.experiments.length && p.role === "primary" && match(p.name));
+  const noneCard = none.length ? `<div class="card mb"><div class="hd"><span class="title">No experiments yet</span><span class="sub">${plural(none.length, "project")}</span></div><div>${none.map(p =>
+    `<div class="row"><a href="${hashOf({ view: "home", p: p.id })}"><b>${esc(p.name)}</b></a><span class="sub">${p.overnight
+      ? `start with <code>researchforge kaggle prepare-round ${esc(p.slug)}</code>`
+      : p.repo && p.repo.next_action ? `next: <code>${esc(p.repo.next_action.split("#")[0].trim())}</code>` : "no experiments recorded"}</span></div>`).join("")}</div></div>` : "";
+  if (!ps.length) return (noneCard || emptyFor("experiments to graph"));
+  let h = `<div class="chips"><span class="sub">Legend:</span>${[["#3b82f6", "best ★"], ["#22c55e", "improved"], ["#06b6d4", "has metric"], ["#f59e0b", "running"], ["#ef4444", "failed"], ["#3b82f6", "planned (outline)"], ["#475569", "no result / stale"], ["#a78bfa", "merge candidate (dashed)"], ["#64748b", "imported from the repo engine (dotted)"]].map(([c, l]) =>
+    `<span class="flex sub"><span class="dot" style="background:${c}"></span>${l}</span>`).join("")}</div>`;
+  const single = ps.length === 1;
+  ps.filter(p => match(p.name, p.experiments.map(e => e.id + " " + e.title))).forEach(p => {
+    const bySrc = { overnight: p.experiments.filter(e => e.source === "overnight"), repo: p.experiments.filter(e => e.source === "repo") };
+    const imported = bySrc.overnight.filter(e => e.imported).length;
+    const open = single || isOpen("dag:" + p.id, ACTIVE.includes(p.state) || (S.route.n && S.route.p === p.id));
+    const imp = p.experiments.filter(e => e.status === "improved").length;
+    h += `<details class="card mb" data-key="dag:${p.id}"${open ? " open" : ""}><summary>${badge(p.state)}<span class="title">${esc(p.name)}</span><span class="sub">${p.experiments.length} runs · ${imp} improved · best ${p.best ? fmtM(p.best.metric) + " (" + esc(p.best.id) + ")" : "—"}</span>${single ? "" : `<a class="right sub" href="${hashOf({ view: "dag", p: p.id })}">open →</a>`}</summary><div class="bd">`;
+    if (open && imported) h += `<div class="sub mb">One history: ${plural(bySrc.overnight.length - imported, "round")} plus ${plural(imported, "experiment")} imported from the repo engine (dotted outline). Those were measured by the repo engine's own benchmark, so they are shown for the record and are never best or a parent.</div>`;
+    if (open) for (const [src, exps] of Object.entries(bySrc)) {
+      if (!exps.length) continue;
+      const { svg, missing } = dagSvg(p, exps, src);
+      const edges = exps.filter(e => e.parents.length).length;
+      h += `<div class="sub">${src === "repo" ? "Repo project experiments (parent_experiment_ids)" : "Rounds (parent_round_num)"} · ${edges ? plural(edges, "parent link") : "all branch from the baseline"}</div>`;
+      if (missing.length) h += issues([{ level: "warn", message: `${missing.map(m => m.id).join(", ")} reference parents not in the log`, hint: "drawn from the baseline" }]);
+      const ids = new Set(exps.map(e => e.id)), mc = (p.merge_candidates || []).filter(m => m.parents.every(x => ids.has(x)));
+      if (mc.length) h += `<div class="sub">${plural(mc.length, "merge candidate")} (dashed)${mc.length > MAX_MERGE_EDGES ? ` — first ${MAX_MERGE_EDGES} drawn; open a node to see all of its pairs` : ""}: ${mc.slice(0, 4).map(m => esc(m.parents.join(" + "))).join(", ")}${mc.length > 4 ? "…" : ""}</div>`;
+      h += `<div class="dag">${svg}</div>`;
+    }
+    const sel = S.route.n && p.experiments.find(e => e.id === S.route.n);
+    if (sel && open) h += nodeDetail(p, sel);
+    h += `</div></details>`;
+  });
+  return h + noneCard;
+}
+
+// ── Hypotheses ─────────────────────────────────────────────────────────────
+// A public notebook's self-reported LB score and its gap to our best public LB.
+function claimLine(p, x) {
+  const k = x.kernel; if (!k) return "";
+  const parts = [];
+  if (typeof k.claimed_score === "number") {
+    const quote = k.claim_snippet ? ` title="${esc((k.claim_source === "notebook" ? "In the notebook: " : "In the title: ") + k.claim_snippet)}"` : "";
+    parts.push(`<span class="badge b-purple"${quote}>claims LB ${esc(fmtM(k.claimed_score))}</span><span class="dim"> (${esc(k.claim_source || "title")})</span>`);
+    const ours = p.our_best_lb;
+    if (ours && typeof k.vs_our_best === "number") {
+      const g = k.vs_our_best, good = g > 0;
+      parts.push(`<span style="color:${good ? "var(--green)" : "var(--muted)"}">${g >= 0 ? "+" : ""}${esc(fmtM(g))} vs our best LB ${esc(fmtM(ours.value))}</span>`);
+    } else if (!ours) parts.push('<span class="dim">no scored submission of ours to compare</span>');
+  } else if (k.ref) parts.push('<span class="dim">no LB claim in its title or notebook</span>');
+  if (k.url) parts.push(`<a href="${esc(k.url)}" target="_blank" rel="noopener">notebook ↗</a>`);
+  if (typeof k.votes === "number") parts.push(`<span class="dim">▲ ${k.votes}</span>`);
+  return parts.length ? `<div class="sub flex" style="gap:8px;flex-wrap:wrap;margin-top:3px">${parts.join("")}</div>` : "";
+}
+const CONF = { high: "b-green", medium: "b-amber", low: "b-gray", blind: "b-red", research_signal: "b-cyan" };
+const ORIGIN_ICON = o => /kernel/.test(o) ? "🔬" : /arxiv/.test(o) ? "📄" : /claude|agent|self|ai/.test(o) ? "💡" : /draft/.test(o) ? "📝" : /imported/.test(o) ? "📥" : "❓";
+function vHyp() {
+  const ps = projects();
+  const all = ps.flatMap(p => p.hypotheses);
+  if (!all.length) return emptyFor("hypotheses");
+  const f = S.chips.hyp || "open";
+  const filters = [["open", "Untested", h => !h.tested && !["rejected", "draft"].includes(h.status)], ["tested", "Tested", h => h.tested], ["draft", "Drafts", h => h.status === "draft"], ["rejected", "Rejected", h => h.status === "rejected"], ["all", "All", () => true]];
+  const pred = (filters.find(x => x[0] === f) || filters[0])[2];
+  const sortBy = S.chips.hypsort || "claim";
+  const claimOf = x => (x.kernel && typeof x.kernel.claimed_score === "number") ? (x.kernel.vs_our_best ?? x.kernel.claimed_score) : -Infinity;
+  let h = `<div class="chips">${filters.map(([k, l, fn]) => `<span class="chip${f === k ? " on" : ""}" data-act="chip" data-group="hyp" data-val="${k}">${l} (${all.filter(fn).length})</span>`).join("")}
+    <span class="sub" style="margin-left:12px">Sort:</span>${[["newest", "pool order"], ["claim", "notebook LB claim"]].map(([k, l]) => `<span class="chip${sortBy === k ? " on" : ""}" data-act="chip" data-group="hypsort" data-val="${k}">${l}</span>`).join("")}</div>`;
+  ps.forEach(p => {
+    const list = p.hypotheses.filter(pred).filter(x => match(p.name, x.title, x.detail, x.origin, x.status));
+    if (sortBy === "claim") list.sort((a, b) => claimOf(b) - claimOf(a));
+    if (!p.hypotheses.length) {
+      if (p.role === "primary" && match(p.name)) h += `<div class="card mb"><div class="hd"><span class="title">${esc(p.name)}</span><span class="sub">no hypotheses yet</span><span class="right">${kindBadges(p)}</span></div><div class="bd sub">${p.overnight
+        ? `Ideas arrive from the kernel watcher and arXiv sensors (<code>researchforge kaggle monitor ${esc(p.slug)}</code>), from <code>researchforge kaggle resynthesize ${esc(p.slug)}</code>, or directly via <code>researchforge kaggle propose-hypothesis ${esc(p.slug)} --idea "…"</code>.`
+        : `Generate them with <code>researchforge hypotheses generate</code> (or <code>/researchforge-hypotheses</code> in Claude Code).`}</div></div>`;
+      return;
+    }
+    h += kernelBoard(p);
+    const untested = p.hypotheses.filter(x => !x.tested && x.status !== "rejected").length;
+    h += `<details class="card mb" ${det("hyp:" + p.id, list.length > 0 && (ps.length === 1 || p.state !== "idle"))}><summary><span class="title">${esc(p.name)}</span><span class="sub">${p.hypotheses.length} total · ${untested} untested · ${list.length} shown</span><span class="right">${kindBadges(p)}</span></summary><div>`;
+    h += list.slice(0, 300).map(x => `<div class="row" style="align-items:flex-start"><span style="font-size:16px">${ORIGIN_ICON(x.origin)}</span>
+      <div style="flex:1;min-width:0"><div class="flex">${esc(x.title)} ${badge(x.tested ? "tested" : x.status)} ${x.confidence ? `<span class="badge ${CONF[x.confidence] || "b-gray"}" title="metric confidence">${esc(x.confidence)}</span>` : ""} ${x.outcome ? badge(x.outcome === "improved" ? "improved" : x.outcome === "failed" ? "failed" : "complete", x.outcome) : ""}</div>
+      ${x.detail ? `<div class="dim" style="border-left:2px solid var(--border);padding-left:8px;margin-top:3px">${esc(x.detail.slice(0, 400))}</div>` : ""}
+      ${claimLine(p, x)}
+      ${x.tested_by.length ? `<div class="sub">Tested by: ${x.tested_by.map(id => `<a class="mono" href="${hashOf({ view: "dag", p: p.id, n: id })}">${esc(id)}</a>`).join(", ")}</div>` : ""}
+      ${x.refs && x.refs.length ? `<div class="dim mono trunc">${x.refs.map(esc).join(" · ")}</div>` : ""}</div>
+      <div style="text-align:right;flex-shrink:0" class="sub"><div>${esc(x.origin)}</div><div>${when(x.created_at)}</div>${x.priority != null ? `<div>p=${esc(x.priority)}</div>` : ""}<div class="mono dim">${esc(x.id)}</div></div></div>`).join("") ||
+      `<div class="empty">No hypotheses match this filter.</div>`;
+    h += `</div></details>`;
+  });
+  return h;
+}
+
+// Public notebooks ranked by the LB score they claim (kernel_board.json, rebuilt hourly).
+function kernelBoard(p) {
+  const b = p.kernel_board;
+  if (!b || !b.rows || !b.rows.length) return "";
+  const rows = b.rows.filter(r => match(p.name, r.title, r.ref, r.author));
+  const ours = typeof b.our_best_lb === "number" ? b.our_best_lb : null;
+  const ahead = b.rows.filter(r => typeof r.gap === "number" && r.gap > 0).length;
+  const tried = r => (r.tried || []).map(t => `<a class="mono" href="${hashOf({ view: "dag", p: p.id, n: "R" + t.round })}" title="${esc(t.note || "")}">R${t.round}</a>${t.lb != null ? ` LB ${fmtM(t.lb)}` : t.local != null ? ` local ${fmtM(t.local)}` : t.note ? " ✗" : ""}`).join(", ");
+  let h = `<details class="card mb" ${det("kb:" + p.id, ahead > 0)}><summary><span class="title">${esc(p.name)} · public notebooks</span><span class="sub">ranked by claimed LB · our best LB ${ours != null ? fmtM(ours) : "—"} · ${ahead} claim more · checked ${when(b.fetched_at)}</span></summary>
+    <div class="sub" style="padding:6px 12px">Claims are the authors' own words (title or notebook text), not measurements. <b>Kaggle #</b> is the notebook's place in Kaggle's best-score order. Re-run notebooks are re-read every hour.</div>
+    <div style="overflow-x:auto"><table><thead><tr><th>Claimed LB</th><th>Gap</th><th>Kaggle #</th><th>Notebook</th><th>Last run</th><th>Our rounds</th></tr></thead><tbody>`;
+  h += rows.map(r => `<tr><td class="mono">${typeof r.claimed_score === "number" ? fmtM(r.claimed_score) : "—"}${r.claim_source ? `<div class="dim" style="font-size:11px" title="${esc(r.claim_snippet || "")}">${esc(r.claim_source)}</div>` : ""}</td>
+    <td class="mono" style="color:${typeof r.gap === "number" && r.gap > 0 ? "var(--green)" : ""}">${typeof r.gap === "number" ? (r.gap > 0 ? "+" : "") + fmtM(r.gap) : "—"}</td>
+    <td class="mono">${r.kaggle_rank || "—"}</td>
+    <td class="trunc" style="max-width:420px"><a href="https://www.kaggle.com/code/${esc(r.ref)}" target="_blank" rel="noopener">${esc(r.title || r.ref)}</a> ${r.updated_at ? `<span class="badge b-amber" title="re-run since first seen">updated ${when(r.updated_at)}</span>` : ""}<div class="dim mono" style="font-size:11px">${esc(r.ref)} · ${esc(r.votes ?? 0)} votes</div></td>
+    <td class="sub">${when(r.last_run_time)}</td><td class="sub">${tried(r) || "—"}</td></tr>`).join("");
+  return h + `</tbody></table></div>${b.total > b.rows.length ? `<div class="sub" style="padding:6px 12px">Top ${b.rows.length} of ${b.total} shown.</div>` : ""}</details>`;
+}
+
+// ── Submissions ────────────────────────────────────────────────────────────
+function vSubs() {
+  const bySlug = new Map();
+  projects().filter(p => p.slug).forEach(p => { if (!bySlug.has(p.slug)) bySlug.set(p.slug, []); bySlug.get(p.slug).push(p); });
+  if (!bySlug.size) return `<div class="empty">Submissions are tracked for Kaggle overnight projects; none in this selection.</div>`;
+  let h = `<div class="sub mb">Submissions belong to the Kaggle competition (one list per slug, shared by every local copy). The dashboard refreshes them in the background every 15 minutes; the monitor's submission sensor also snapshots them.</div>`;
+  for (const [slug, ps] of bySlug) {
+    const best = ps.map(p => p.submissions).sort((a, b) => (b.fetched_at || "").localeCompare(a.fetched_at || ""))[0];
+    const items = best.items.filter(s => match(slug, s.file, s.description, s.status, s.public));
+    const k = "subs:" + slug;
+    const daily = ps.map(p => p.submissions.daily).find(Boolean);
+    const left = daily ? ` · ${daily.remaining} left today (resets ${esc(new Date(daily.resets_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))})` : "";
+    h += `<details class="card mb" ${det(k, true)}><summary><span class="title">${esc(slug)}</span><span class="sub">${best.items.length} submissions${left}</span>
+      <span class="right flex sub">${best.status === "pending" ? "not fetched yet" : `${esc(best.source || "")} · ${when(best.fetched_at)}`} <button data-act="subs" data-id="${ps[0].id}" ${S.busy.has(k) ? "disabled" : ""}>${S.busy.has(k) ? "Fetching…" : "Refresh"}</button></span></summary>`;
+    if (best.error) h += `<div class="bd">${issues([{ level: "error", message: "Kaggle CLI: " + best.error, hint: best.items.length ? "showing the last good listing" : "" }])}</div>`;
+    h += items.length ? `<div class="tbl"><table><thead><tr><th>Ref</th><th>File</th><th>Description</th><th>Date</th><th>Status</th><th>Public</th><th>Private</th></tr></thead><tbody>${items.map(s =>
+      `<tr><td class="mono">${esc(s.ref)}</td><td class="trunc">${esc(s.file)}</td><td class="trunc sub" title="${esc(s.description)}">${esc(s.description)}</td><td class="sub" style="white-space:nowrap">${esc((s.date || "").replace("T", " ").slice(0, 16))}</td>
+       <td>${badge(s.status === "complete" ? "complete_sub" : s.status === "error" ? "error" : "pending", s.status)}</td><td class="mono" style="color:var(--green)">${esc(s.public || "—")}</td><td class="mono">${esc(s.private || "—")}</td></tr>`).join("")}</tbody></table></div>` :
+      `<div class="empty">${best.status === "pending" ? "Fetching from Kaggle…" : best.status === "error" ? "No submissions could be listed." : "No submissions for this competition yet."}</div>`;
+    h += `</details>`;
+  }
+  return h;
+}
+
+// ── Timeline ───────────────────────────────────────────────────────────────
+// Notifications belong to a competition, so every local copy of a slug carries
+// them; show each once.
+function mergeEvents(ps, perProject) {
+  const out = [], seen = new Set();
+  ps.forEach(p => p.timeline.slice(0, perProject || 1e9).forEach(e => {
+    if (e.kind === "notification") { const k = e.ts + "|" + e.title; if (seen.has(k)) return; seen.add(k); }
+    out.push({ p, e });
+  }));
+  return out.sort((a, b) => b.e.ts.localeCompare(a.e.ts));
+}
+const GANTT_ROWS = 30;
+const KINDS = ["experiment", "hypothesis", "submission", "sensor", "claude", "notification", "run", "baseline", "validation", "setup", "ship"];
+function vTimeline() {
+  const ps = projects();
+  const on = S.chips.kinds || KINDS;
+  const now = new Date();
+  let h = "";
+  const dls = ps.filter(p => p.overnight && p.overnight.competition.deadline && new Date(p.overnight.competition.deadline) > now);
+  if (dls.length) h += `<div class="chips">${[...new Map(dls.map(p => [p.slug, p])).values()].map(p => {
+    const ms = new Date(p.overnight.competition.deadline) - now, d = Math.floor(ms / 864e5), hh = Math.floor(ms % 864e5 / 36e5);
+    return `<span class="chip">⏳ ${esc(p.slug)}: ${d}d ${hh}h left</span>`; }).join("")}</div>`;
+  h += gantt(ps);
+  h += `<div class="chips">${KINDS.map(k => `<span class="chip${on.includes(k) ? " on" : ""}" data-act="chip" data-group="kinds" data-val="${k}">${k}</span>`).join("")}</div>`;
+  const ev = mergeEvents(ps);
+  const f = ev.filter(({ p, e }) => on.includes(e.kind) && match(p.name, e.title, e.detail, e.kind)).slice(0, 600);
+  if (!f.length) return h + `<div class="empty">No events${ev.length ? " match the filters" : " recorded yet — they appear as experiments run, hypotheses arrive, sensors fire and notifications are sent"}.</div>`;
+  let day = "", out = "";
+  f.forEach(({ p, e }) => {
+    const d = e.ts.slice(0, 10);
+    if (d !== day) { if (day) out += `</div>`; day = d; out += `<div class="sec">${esc(d)}</div><div class="card">`; }
+    const target = e.ref && /^(R\d+|exp-)/.test(e.ref) ? hashOf({ view: "dag", p: p.id, n: e.ref }) : null;
+    out += `<div class="row${target ? " click" : ""}"${target ? ` data-act="link" data-href="${esc(target)}"` : ""} style="${e.priority === "high" ? "border-left:3px solid var(--amber)" : ""}">
+      <span class="mono dim" style="width:42px">${esc(e.ts.slice(11, 16))}</span><span class="badge b-gray" style="width:92px;text-align:center">${esc(e.kind)}</span>
+      <div style="flex:1;min-width:0"><div class="trunc">${ps.length > 1 ? `<b>${esc(p.name)}</b> · ` : ""}${esc(e.title)}</div>${e.detail ? `<div class="dim trunc">${esc(e.detail)}</div>` : ""}</div></div>`;
+  });
+  return h + out + `</div>`;
+}
+
+// Gantt: each experiment's recorded start → end, per project (most recent runs).
+function gantt(ps) {
+  const rows = ps.filter(p => p.role === "primary").map(p => ({ p, exps: p.experiments.filter(e => e.started_at && match(p.name, e.id, e.title))
+    .sort((a, b) => a.started_at.localeCompare(b.started_at)).slice(-GANTT_ROWS) })).filter(x => x.exps.length);
+  if (!rows.length) return "";
+  const shown = S.route.p === "all" ? rows.sort((a, b) => b.exps[b.exps.length - 1].started_at.localeCompare(a.exps[a.exps.length - 1].started_at)).slice(0, 3) : rows;
+  const key = "gantt", open = isOpen(key, true);
+  let h = `<details class="card mb" data-key="${key}"${open ? " open" : ""}><summary><span class="title">Run timeline</span><span class="sub">experiment start → end${S.route.p === "all" ? " · 3 most recent projects (pick one for its own)" : ""} · last ${GANTT_ROWS} runs each</span></summary><div class="bd">`;
+  if (open) shown.forEach(({ p, exps }) => {
+    const t = ts => new Date(ts).getTime(), now = Date.now();
+    const end = e => e.completed_at ? t(e.completed_at) : e.status === "running" ? now : t(e.started_at) + (e.duration_s || 0) * 1000;
+    const lo = Math.min(...exps.map(e => t(e.started_at))), hi = Math.max(lo + 60000, ...exps.map(end));
+    const W = 760, L = 150, rowH = 16, x = v => L + (v - lo) / (hi - lo) * (W - L - 10);
+    const bars = exps.map((e, i) => {
+      const [, stroke] = nodeColors(e, p.best && p.best.id === e.id), x1 = x(t(e.started_at)), x2 = Math.max(x1 + 3, x(end(e)));
+      return `<g class="click" data-act="link" data-href="${esc(hashOf({ view: "dag", p: p.id, n: e.id }))}"><title>${esc(`${e.id}: ${e.title}\n${e.started_at} → ${e.completed_at || (e.status === "running" ? "running" : "no end recorded")} (${dur(e.duration_s)})`)}</title>
+        <text x="0" y="${i * rowH + 12}" fill="#94a3b8" font-size="10">${esc((e.id + " " + e.title).slice(0, 26))}</text>
+        <rect x="${x1}" y="${i * rowH + 3}" width="${x2 - x1}" height="${rowH - 6}" rx="2" fill="${stroke}"${e.completed_at || e.status === "running" ? "" : ' fill-opacity="0.45"'}/></g>`;
+    }).join("");
+    h += `<div class="sub mt">${esc(p.name)} · ${esc(exps[0].started_at.slice(0, 16).replace("T", " "))} → ${esc(new Date(hi - new Date(hi).getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace("T", " "))}</div>
+      <div class="dag"><svg width="${W}" height="${exps.length * rowH + 4}" xmlns="http://www.w3.org/2000/svg">${bars}</svg></div>`;
+  });
+  return h + `</div></details>`;
+}
+
+// ── Insights ───────────────────────────────────────────────────────────────
+function spark(p) {
+  const pts = p.experiments.filter(e => typeof e.metric === "number" && e.status !== "failed" && !e.imported).sort((a, b) => (a.started_at || "").localeCompare(b.started_at || ""));
+  if (pts.length < 2) return '<span class="dim">—</span>';
+  const vals = pts.map(e => e.metric), bl = pts[0].baseline;
+  const all = typeof bl === "number" ? vals.concat([bl]) : vals;
+  const lo = Math.min(...all), hi = Math.max(...all), W = 200, H = 40, sx = i => i / (pts.length - 1) * (W - 4) + 2, sy = v => hi === lo ? H / 2 : H - 3 - (v - lo) / (hi - lo) * (H - 6);
+  return `<svg width="${W}" height="${H}"><title>${pts.length} metrics ${fmtM(lo)}–${fmtM(hi)}</title>${typeof bl === "number" ? `<line x1="0" x2="${W}" y1="${sy(bl)}" y2="${sy(bl)}" stroke="#64748b" stroke-dasharray="3 3"/>` : ""}
+    <polyline fill="none" stroke="#60a5fa" stroke-width="1.5" points="${pts.map((e, i) => sx(i) + "," + sy(e.metric)).join(" ")}"/>${pts.map((e, i) => `<circle cx="${sx(i)}" cy="${sy(e.metric)}" r="2" fill="${e.status === "improved" ? "#4ade80" : "#94a3b8"}"/>`).join("")}</svg>`;
+}
+// Which way this project's metric improves, and a warning when setup only guessed it.
+function dirTag(p) {
+  const c = p.overnight && p.overnight.competition;
+  const d = (c && c.direction) || (p.experiments[0] && p.experiments[0].metric_direction);
+  if (!d) return "";
+  const src = (c && c.direction_source) || "", unsure = !!c && (src === "guess" || !src);
+  const from = { leaderboard: "from the leaderboard order", ai: "read from the evaluation text", keyword: "from the metric name", user: "set by you" };
+  const fix = `researchforge kaggle settings ${p.slug} --metric-direction ${d.startsWith("max") ? "minimize" : "maximize"}`;
+  const tip = unsure ? `${src ? "Setup guessed this" : "Setup did not record how it knew this"}. If it is wrong: ${fix}` : `Direction ${from[src] || "from setup"}`;
+  return `<div class="dim" style="font-size:11px${unsure ? ";color:var(--amber)" : ""}" title="${esc(tip)}">${d.startsWith("max") ? "↑ higher is better" : "↓ lower is better"}${unsure ? (src ? " (guessed)" : " (unchecked)") : ""}</div>`;
+}
+function vInsights() {
+  const ps = projects().filter(p => p.role === "primary" || S.route.p !== "all");
+  const exps = ps.flatMap(p => p.experiments), imp = exps.filter(e => e.status === "improved").length, fail = exps.filter(e => e.status === "failed").length;
+  const hyps = ps.flatMap(p => p.hypotheses), tested = hyps.filter(h => h.tested).length;
+  const tok = ps.reduce((a, p) => ({ i: a.i + p.tokens.input_tokens, o: a.o + p.tokens.output_tokens, c: a.c + (p.tokens.estimated_cost_usd || 0), n: a.n + p.tokens.calls }), { i: 0, o: 0, c: 0, n: 0 });
+  const tiles = [["Experiments", exps.length, "var(--accent)"], ["Improved", imp, "var(--green)"], ["Improvement rate", exps.length ? Math.round(imp / exps.length * 100) + "%" : "—", "var(--green)"],
+    ["Failed", fail, "var(--red)"], ["Hypotheses tested", `${tested}/${hyps.length}`, "var(--purple)"], ["Tokens metered", tok.n ? (tok.i + tok.o).toLocaleString() : "0", "var(--amber)"]];
+  let h = `<div class="grid g4 mb">${tiles.map(([l, v, c]) => `<div class="card stat"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div></div>`).join("")}</div>`;
+  h += `<div class="card mb"><div class="tbl"><table><thead><tr><th>Project</th><th>Runs</th><th>Improved</th><th>Rate</th><th>Baseline</th><th>Best</th><th>Metric progression</th></tr></thead><tbody>${ps.filter(p => p.experiments.length && match(p.name)).map(p => {
+    const e = p.experiments, i = e.filter(x => x.status === "improved").length, bl = e.find(x => typeof x.baseline === "number");
+    return `<tr class="click" data-act="link" data-href="${esc(hashOf({ view: "dag", p: p.id }))}"><td>${esc(p.name)}<div class="dim mono trunc">${shortPath(p.location)}</div></td><td>${e.length}</td><td style="color:var(--green)">${i}</td><td>${Math.round(i / e.length * 100)}%</td>
+      <td class="mono">${bl ? fmtM(bl.baseline) : "—"}</td><td class="mono" style="color:var(--accent)">${p.best ? fmtM(p.best.metric) : "—"}${dirTag(p)}</td><td>${spark(p)}</td></tr>`; }).join("") || `<tr><td colspan="7" class="empty">No experiments yet.</td></tr>`}</tbody></table></div></div>`;
+  // Tokens
+  h += `<div class="sec">Token usage</div><div class="card"><div class="bd">`;
+  const withTok = ps.filter(p => p.tokens.calls);
+  h += tok.n ? `<div class="sub mb">${tok.n} metered calls · ${tok.i.toLocaleString()} in / ${tok.o.toLocaleString()} out · est. <b>$${tok.c.toFixed(2)}</b> at list prices (override in <code>~/.config/researchforge/dashboard.json</code> → <code>token_prices</code>)</div>` :
+    `<div class="sub mb">No metered model calls recorded yet. Direct API calls are logged to <code>.overnight_&lt;slug&gt;/token_usage.jsonl</code> and the project DB's <code>ai_calls</code> table.</div>`;
+  if (withTok.length) h += `<div class="tbl"><table><thead><tr><th>Project</th><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>By purpose</th></tr></thead><tbody>${withTok.flatMap(p => Object.entries(p.tokens.by_model).map(([m, v]) =>
+    `<tr><td>${esc(p.name)}</td><td class="mono">${esc(m)}</td><td>${v.calls}</td><td>${v.input.toLocaleString()}</td><td>${v.output.toLocaleString()}</td><td class="sub">${Object.entries(p.tokens.by_purpose).map(([k, n]) => `${esc(k)}: ${n.toLocaleString()}`).join(" · ")}</td></tr>`)).join("")}</tbody></table></div>`;
+  const perRound = withTok.filter(p => Object.keys(p.tokens.by_round || {}).length);
+  if (perRound.length) h += `<div class="sec">Proposal tokens per round</div><div class="tbl"><table><thead><tr><th>Project</th><th>Rounds</th></tr></thead><tbody>${perRound.map(p =>
+    `<tr><td>${esc(p.name)}</td><td class="sub">${Object.entries(p.tokens.by_round).map(([r, n]) => `<a href="${hashOf({ view: "dag", p: p.id, n: r })}">${esc(r)}</a>: ${n.toLocaleString()}`).join(" · ")}</td></tr>`).join("")}</tbody></table></div>`;
+  const unobs = ps.filter(p => p.tokens.unobservable);
+  if (unobs.length) h += issues([{ level: "info", message: `${unobs.map(p => p.name).join(", ")}: proposals run in claude_code mode`, hint: unobs[0].tokens.note }]);
+  h += `</div></div>`;
+  return h;
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────
+document.addEventListener("toggle", e => {
+  const k = e.target.dataset && e.target.dataset.key; if (!k) return;
+  S.open.set(k, e.target.open); lsSet("rf.open", JSON.stringify([...S.open].slice(-300)));
+  if (k.startsWith("dag:") && e.target.open && !e.target.querySelector("svg")) render();
+}, true);
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const a = el.dataset.act, id = el.dataset.id, p = id && byId(id);
+  if (a === "nav") go({ view: el.dataset.view });
+  else if (a === "node") { e.preventDefault(); go({ view: "dag", p: id, n: el.dataset.node }); }
+  else if (a === "link") location.hash = el.dataset.href;
+  else if (a === "chip") {
+    const g = el.dataset.group, v = el.dataset.val;
+    if (g === "kinds") { const cur = new Set(S.chips.kinds || KINDS); cur.has(v) ? cur.delete(v) : cur.add(v); S.chips.kinds = [...cur]; }
+    else S.chips[g] = v;
+    lsSet("rf.chips", JSON.stringify(S.chips)); render();
+  }
+  else if (a === "monitor" && p) act("mon:" + id, () => api("/api/monitor/run", { project: id }), `Monitor cycle started for ${p.name} — sensor status updates when it finishes.`);
+  else if (a === "subs" && p) act("subs:" + p.slug, () => api("/api/submissions/refresh", { project: id }), `Submissions refreshed for ${p.slug}`);
+  else if (a === "sensor-remove" && p) { if (confirm(`Remove custom sensor ${el.dataset.name}?`)) act(`sensor:${id}:${el.dataset.name}`, () => api("/api/sensor/remove", { project: id, name: el.dataset.name }), "Sensor removed"); }
+  else if (a === "sensor-add" && p) {
+    const name = document.getElementById("sn-name-" + id).value.trim(), command = document.getElementById("sn-cmd-" + id).value.trim(), timeout = +document.getElementById("sn-to-" + id).value || 120;
+    if (!name || !command) { toast("Name and command are required", "err"); return; }
+    act("addsensor:" + id, () => api("/api/sensor/add", { project: id, name, command, timeout }), `Sensor ${name} added — it runs on the next monitor cycle.`);
+  }
+  else if (a === "ra" && p) {
+    const op = el.dataset.op, body = { project: id, op };
+    if (op === "start" && !confirm(`Start a launch now on ${p.name}?\n\nIt runs up to ${p.repo.auto_run.config.rounds_per_launch} round(s) of the repo loop in\n${p.root}\nwith ${DRIVER_NAMES[p.repo.auto_run.config.driver]}. ${p.repo.auto_run.standing ? "Plans run under your standing approval." : "New plans wait for your approval."}`)) return;
+    if (op === "stop" && !confirm(`Stop the running launch on ${p.name}? Finished experiments are kept.`)) return;
+    if (op === "pause") { const why = prompt(`Pause ${p.name}? A running launch finishes; no new one starts.\n\nWhy (optional):`); if (why === null) return; body.text = why; }
+    act(`ra-${op}:` + id, () => api("/api/repo/auto", body), { start: "Launch started", stop: "Asked the launch to stop", pause: "Paused", resume: "Resumed", monitor: "Monitor cycle started — the checks update when it finishes" }[op]);
+  }
+  else if (a === "ra-save" && p) {
+    const v = n => document.getElementById(n + id);
+    const changes = { rounds_per_launch: +v("ra-rnd-").value, max_rounds_per_day: +v("ra-day-").value, max_minutes: +v("ra-min-").value, poll_minutes: +v("ra-poll-").value, merge: v("ra-merge-").checked, metric_gate: !v("ra-nogate-").checked };
+    act("ra-settings:" + id, () => api("/api/repo/auto", { project: id, op: "settings", changes }), p.repo.auto_run.service.installed && changes.poll_minutes !== p.repo.auto_run.config.poll_minutes ? "Saved — switch the service off and on to use the new interval" : "Auto-run settings saved");
+  }
+  else if (a === "ra-driver" && p) {
+    const driver = S.drv[id] || p.repo.auto_run.config.driver, model = document.getElementById("ra-model-" + id).value.trim();
+    act("ra-settings:" + id, () => api("/api/repo/auto", { project: id, op: "settings", changes: { driver, model } }).then(r => { delete S.drv[id]; return r; }), `Driver: ${DRIVER_NAMES[driver]}`);
+  }
+  else if (a === "ra-topic" && p) act("ra-settings:" + id, () => api("/api/repo/auto", { project: id, op: "settings", changes: { ntfy_topic: document.getElementById("ra-topic-" + id).value.trim() } }), "Topic saved");
+  else if (a === "ra-approval" && p) {
+    const mode = el.dataset.mode, body = { project: id, op: "approval", mode };
+    if (mode === "standing") {
+      const c = p.repo.auto_run.config;
+      const typed = prompt(`Give ${p.name} a standing approval?\n\nAuto-run then runs every plan it writes without asking: up to ${c.rounds_per_launch} round(s) per launch and ${c.max_rounds_per_day} a day, each experiment inside the contract's limits. You can go back to asking any time.\n\nType approve to confirm:`);
+      if (typed === null) return;
+      body.typed = typed;
+    }
+    act("ra-approval:" + id, () => api("/api/repo/auto", body), mode === "standing" ? "Standing approval given" : "Each plan now waits for you");
+  }
+  else if (a === "ar-save" && p) {
+    const body = { project: id, rounds_per_launch: +document.getElementById("ar-rnd-" + id).value, max_rounds_per_day: +document.getElementById("ar-day-" + id).value };
+    act("ar:" + id, () => api("/api/autorun", body), "Auto-run limits saved");
+  }
+  else if (a === "bell") {
+    e.preventDefault();
+    S.inboxOpen = !S.inboxOpen;
+    if (!S.inboxOpen) { S.qSeen = localNow(); lsSet("rf.qSeen", S.qSeen); }  // read once the menu is closed
+    renderInbox();
+  }
+  else if (a === "plan-decide" && p) {
+    const plan = el.dataset.plan, decision = el.dataset.decision, k = el.dataset.k, comment = S.ans["c:" + k] || "";
+    let typed = "";
+    if (decision === "approve") {
+      typed = prompt(`${p.name}: let ${plural(+el.dataset.n || 0, "experiment")} of ${plan} run on this machine?\n\nThey run the plan's code changes against your repository's benchmark.${comment ? "\nYour comment: " + comment : ""}\n\nType  approve  to allow it:`);
+      if (typed === null) return;
+      if (typed.trim().toLowerCase() !== "approve") { toast("Not approved — type approve to allow it", "err"); return; }
+    } else if (!confirm(`Reject ${plan} of ${p.name}? Its experiments are cancelled.${comment ? "\nYour comment goes to the next plan: " + comment : "\nAdd a comment to say why — the next plan reads it."}`)) return;
+    act(`q:${k}`, () => api("/api/plan/approve", { project: id, plan, decision, typed, comment }).then(r => { delete S.ans["c:" + k]; return r; }),
+      decision === "approve" ? `${plan} approved — the next auto-run launch runs it` : `${plan} rejected`);
+  }
+  else if (a === "q-group") {
+    const k = el.dataset.key;
+    S.qOpen.has(k) ? S.qOpen.delete(k) : S.qOpen.add(k);
+    lsSet("rf.qOpen", JSON.stringify([...S.qOpen])); render();
+  }
+  else if (a === "q-dismiss" && p) {
+    const qid = el.dataset.q, where = el.dataset.where, k = `${id}:${where}:${qid}`, comment = S.ans["c:" + k] || "";
+    act(`q:${k}`, () => api("/api/question/answer", { project: id, where, id: qid, dismiss: true, comment }).then(r => { delete S.ans["c:" + k]; return r; }), `Dismissed ${qid}`);
+  }
+  else if ((a === "q-answer" || a === "q-send") && p) {
+    const qid = el.dataset.q, where = el.dataset.where, k = `${id}:${where}:${qid}`;
+    const answer = a === "q-answer" ? el.dataset.val : (document.getElementById(`${el.dataset.pre}-${k}`) || {}).value || "";
+    if (!answer.trim()) { toast("Type an answer first", "err"); return; }
+    if (el.dataset.kind === "submission_approval" && answer === "yes" && !confirm(`Submit this round to Kaggle now for ${p.name}?\n\nIt uses one of today's submissions. If Kaggle refuses, the question stays open.`)) return;
+    if (a === "q-answer" && el.dataset.changes && !confirm(`"${answer}" also changes ${p.name}'s Run configs:\n\n${el.dataset.changes}\n\nGo ahead?`)) return;
+    const comment = S.ans["c:" + k] || "";
+    act("q:" + k, () => api("/api/question/answer", { project: id, where, id: qid, answer, comment }).then(r => {
+      delete S.ans[k]; delete S.ans["c:" + k];
+      if (r.applied && r.applied.length) r.output = "Run configs: " + r.applied.join("; ");
+      return r;
+    }), `Answered ${qid}: ${answer}`);
+  }
+  else if (a === "cfg-save" && p) {
+    const edits = Object.entries(S.cfg[id] || {});
+    const toColab = edits.some(([f, v]) => f === "compute" && v === "colab"), cli = ((p.overnight.run_config || {}).colab || {}).cli || {};
+    if (toColab && !cli.installed && confirm("Colab rounds need Google's Colab CLI. Install it now?\n\nRuns: uv tool install google-colab-cli\nThen sign in from the Colab row.")) act("colab", () => api("/api/colab", { project: id, op: "install" }), "Colab CLI installed — now sign in");
+    act("cfg:" + id, async () => {
+      const done = [];
+      for (const [field, value] of edits) {
+        await api("/api/config", { project: id, field, value });  // stops at the first refusal
+        done.push(field); delete S.cfg[id][field];
+      }
+      if (!Object.keys(S.cfg[id] || {}).length) delete S.cfg[id];
+      return { output: done.join(", ") };
+    }, "Saved");
+  }
+  else if (a === "cfg-reset" && p) { delete S.cfg[id]; render(); }
+  else if (a === "topic-new" && p) { (S.cfg[id] = S.cfg[id] || {})[el.dataset.field] = newTopic(p); render(); }
+  else if (a === "notify-test" && p) act("ntest:" + id, () => api("/api/notify-test", { project: id }), "Test alert sent — check your phone");
+  else if (a === "colab" && p) {
+    const op = el.dataset.op;
+    if (op === "install" && !confirm("Install Google's Colab CLI on this machine?\n\nRuns: uv tool install google-colab-cli\nIt lets rounds run on Colab GPUs without you clicking Run All. Next step: sign in to Colab.")) return;
+    const body = { project: id, op };
+    if (op === "code") { body.code = (document.getElementById("colab-code") || {}).value || ""; if (!body.code.trim()) { toast("Paste the code Google showed", "err"); return; } }
+    act("colab", () => api("/api/colab", body).then(r => {
+      if (op === "signin") { S.colabUrl = r.url || null; if (r.url) window.open(r.url, "_blank", "noopener"); }
+      if (op === "code" || op === "cancel") S.colabUrl = null;
+      return r;
+    }), { install: "Colab CLI installed — now sign in", signin: "Google's sign-in opened in a new tab", code: "Signed in to Colab", cancel: "Sign-in cancelled" }[op]);
+  }
+  else if (a === "cfg-add" && p) {
+    const k = document.getElementById("cfg-newk-" + id).value.trim().replace(/\s+/g, "_"), v = document.getElementById("cfg-newv-" + id).value.trim();
+    if (!k || !v) { toast("Give a topic and what you know", "err"); return; }
+    act("cfg:" + id, () => api("/api/config", { project: id, field: "answer:" + k, value: v }), `Added ${k} — the next proposal reads it`);
+  }
+  else if (a === "round" && p) {
+    e.stopPropagation();
+    const op = el.dataset.op, n = el.dataset.round;
+    const ask = { archive: `Archive R${n} of ${p.name}?\n\nIt disappears from the views, is never used as a parent and never counts as best. You can restore it from Runs → Archived.`,
+      delete: `Delete R${n} of ${p.name} for good?\n\nThis removes it from the experiment log and cannot be undone.` }[op];
+    if (ask && !confirm(ask)) return;
+    act(`round:${id}:${n}`, () => api("/api/round", { project: id, round: n, op }), `R${n} ${{ archive: "archived", restore: "restored", delete: "deleted" }[op]}`);
+  }
+  else if (a === "drv-save" && p) {
+    const driver = S.drv[id] || p.overnight.auto_run.config.driver;
+    const body = { project: id, driver, model: document.getElementById("drv-model-" + id).value.trim(), route_sensors: document.getElementById("drv-sens-" + id).checked };
+    act("drv:" + id, () => api("/api/driver", body).then(r => { delete S.drv[id]; return r; }), `Driver: ${DRIVER_NAMES[driver]} — the next launch and sensor call use it`);
+  }
+  else if (a === "ar-start" && p) {
+    const c = p.overnight.auto_run.config;
+    if (confirm(`Start ${DRIVER_NAMES[c.driver]} now for up to ${c.rounds_per_launch} round(s) on ${p.slug}?\n\nIt runs prepare-round / execute-round unattended in\n${p.location}\nand never submits to Kaggle.`)) act("arstart:" + id, () => api("/api/autorun/start", { project: id }), "Auto-run launch started");
+  }
+  else if (a === "ar-stop" && p) {
+    if (confirm(`Stop the running auto-run launch on ${p.slug}? Rounds it finished are kept.`)) act("arstop:" + id, () => api("/api/autorun/stop", { project: id }), "Asked the launch to stop");
+  }
+  else if (a === "key-set") {
+    const name = el.dataset.name, value = S.ans["key:" + name] || "";
+    if (!value.trim()) { toast("Paste the value first", "err"); return; }
+    act("key:" + name, () => api("/api/keys/set", { name, value, username: name === "kaggle" ? S.ans["keyuser:kaggle"] || "" : "" }).then(r => {
+      delete S.ans["key:" + name];
+      if (!r.test.ok) throw new Error(`saved, but the test failed: ${r.test.detail}`);
+      return { output: r.test.detail };
+    }), "Saved and tested");
+  }
+  else if (a === "key-test") {
+    const name = el.dataset.name;
+    act("key:" + name, () => api("/api/keys/test", { name }).then(r => { if (!r.test.ok) throw new Error(r.test.detail); return { output: r.test.detail }; }), "Test passed");
+  }
+  else if (a === "key-remove") {
+    const name = el.dataset.name;
+    if (confirm(`Remove the ${name} key from this machine?\n\nUnattended runs that use it stop working until you set it again.`)) act("key:" + name, () => api("/api/keys/remove", { name }), "Removed");
+  }
+  else if (a === "key-colab") {
+    const op = el.dataset.op;
+    if (op === "install" && !confirm("Install Google's Colab CLI on this machine?\n\nRuns: uv tool install google-colab-cli")) return;
+    const body = { op };
+    if (op === "code") { body.code = S.ans["colab-code"] || ""; if (!body.code.trim()) { toast("Paste the code Google showed", "err"); return; } }
+    act("colab", () => api("/api/keys/colab", body).then(r => {
+      if (op === "signin") { S.colabUrl = r.url || null; if (r.url) window.open(r.url, "_blank", "noopener"); }
+      if (op === "code" || op === "cancel") { S.colabUrl = null; delete S.ans["colab-code"]; }
+      return r;
+    }), { install: "Colab CLI installed — now sign in", signin: "Google's sign-in opened in a new tab", code: "Signed in to Colab", cancel: "Sign-in cancelled" }[op]);
+  }
+  else if (a === "new-facts" || a === "new-refacts") {
+    const competition = a === "new-facts" ? (S.ans["new:competition"] || "").trim() : el.dataset.slug;
+    const root = a === "new-facts" ? (S.ans["new:root"] || "").trim() : el.dataset.art.replace(/\/[^/]+$/, "");
+    if (!competition) { toast("Paste the competition URL first", "err"); return; }
+    act("new", () => api("/api/new/facts", { competition, root }).then(r => { delete S.ans["new:competition"]; delete S.ans["new:root"]; return r; }), "Gathering facts — the questions appear below when it finishes");
+  }
+  else if (a === "new-gpus") {
+    const art = el.dataset.art, provider = (S.wiz[art].cloud || {}).provider || "runpod";
+    act("gpus", () => api("/api/new/cloud-gpus", { provider }).then(r => { S.cloudGpus[provider] = r.gpus; return { output: `${r.gpus.length} GPU types` }; }), `GPUs on ${provider}`);
+  }
+  else if (a === "new-save") act("new:" + el.dataset.art, () => api("/api/new/draft", { artifacts_dir: el.dataset.art, form: S.wiz[el.dataset.art] }), "Saved — finish it here or with /overnight in Claude Code or Cursor");
+  else if (a === "new-setup") {
+    const art = el.dataset.art, w = S.wiz[art];
+    if (!confirm(`Set up this competition now?\n\nRuns setup in ${art.replace(/\/[^/]+$/, "")}: compute, the baseline (it can take a while), sensors${w.sensors && w.sensors.auto_run_sensor ? ", auto-run" : ""}${w.scheduler && w.scheduler.on ? " and the background service" : ""}.\nNothing is submitted to Kaggle.`)) return;
+    act("new:" + art, () => api("/api/new/setup", { artifacts_dir: art, form: w }), "Setup started — progress shows on this card");
+  }
+  else if (a === "new-discard") {
+    const art = el.dataset.art;
+    if (confirm(`Discard this setup draft?\n\nYour answers are deleted; the facts already gathered in ${art} stay.`)) act("new:" + art, () => api("/api/new/discard", { artifacts_dir: art }).then(r => { delete S.wiz[art]; return r; }), "Draft discarded");
+  }
+  else if (a === "steer-add" && p) {
+    const text = (S.ans["steer:" + id] || "").trim(), kind = document.getElementById("steer-kind-" + id).value;
+    if (!text) { toast("Write the direction first", "err"); return; }
+    act("steer:" + id, () => api("/api/steer", { project: id, op: "add", text, kind }).then(r => { delete S.ans["steer:" + id]; return r; }),
+      kind === "standing" ? "Direction added — every round follows it until you remove it" : "Direction sent — the next round reads it");
+  }
+  else if (a === "steer-remove" && p) act("steer:" + id, () => api("/api/steer", { project: id, op: "remove", id: el.dataset.d }), "Direction removed");
+  else if (a === "steer-old" && p) { e.preventDefault(); S.open.set("steerold:" + id, !S.open.get("steerold:" + id)); render(); }
+  else if (a === "loop" && p) {
+    const op = el.dataset.op, body = { project: id, op };
+    if (op === "pause") { const why = prompt(`Pause ${p.name}? A round already running finishes; no new one starts.\n\nWhy (optional, shown here):`); if (why === null) return; body.text = why; }
+    if (op === "resynthesize" && !confirm(`Re-synthesize ${p.name} now?\n\nThe idea pool is rebuilt from the results so far, with the project's driver. It can take a few minutes.`)) return;
+    if (op === "add-idea") { body.text = (S.ans["idea:" + id] || "").trim(); if (!body.text) { toast("Write the idea first", "err"); return; } }
+    act("loop:" + id, () => api("/api/loop", body).then(r => { if (op === "add-idea") delete S.ans["idea:" + id]; return r; }),
+      { pause: "Paused", resume: "Resumed", resynthesize: "Re-synthesized", "add-idea": "Idea added — the next prepare-round sees it first" }[op]);
+  }
+  else if (a === "sched" && p) schedule(p, el.dataset.on === "1");
+});
+document.addEventListener("change", e => {
+  const el = e.target, a = el.dataset && el.dataset.act, id = el.dataset && el.dataset.id, p = id && byId(id);
+  if (a === "sched-toggle" && p) { const want = el.checked; el.checked = !want; schedule(p, want); }
+  else if (a === "ra-service" && p) {
+    const want = el.checked, sv = p.repo.auto_run.service; el.checked = !want;
+    if (!confirm(want ? `Install the background service ${sv.label}?\n\nIt runs a monitor cycle for ${p.root} every ${p.repo.auto_run.config.poll_minutes} min, also with the dashboard closed.` : `Remove the background service ${sv.label}? Launches stop starting by themselves.`)) return;
+    act("ra-service:" + id, () => api("/api/repo/auto", { project: id, op: "service", enabled: want }), want ? "Service installed" : "Service removed");
+  }
+  else if (a === "ra-enabled" && p) { const want = el.checked; el.checked = !want; act("ra-settings:" + id, () => api("/api/repo/auto", { project: id, op: "settings", changes: { enabled: want } }), want ? (p.repo.auto_run.service.installed ? "Auto-run on" : "Auto-run on — install the background service so it runs by itself") : "Auto-run off"); }
+  else if (a === "drv-pick" && p) { S.drv[id] = el.value; render(); }
+  else if (el.dataset && el.dataset.wiz && S.wiz[el.dataset.art]) {  // a choice that changes which questions show
+    if (el.type === "radio" && !el.checked) return;
+    wset(S.wiz[el.dataset.art], el.dataset.wiz, el.type === "checkbox" ? el.checked : el.value);
+    if (el.tagName === "SELECT" || el.type === "checkbox" || el.type === "radio") { el.blur(); render(); }
+  }
+  else if (a === "sensor-toggle" && p) { const want = el.checked; el.checked = !want; act(`sensor:${id}:${el.dataset.name}`, () => api("/api/sensor", { project: id, name: el.dataset.name, enabled: want }), `${el.dataset.name} ${want ? "enabled" : "disabled"}`); }
+});
+function schedule(p, enable) {
+  const hours = +((document.getElementById("int-" + p.id) || {}).value || 6);
+  const s = p.scheduler;
+  const msg = enable
+    ? `Install launchd job ${s.label}?\n\nRuns \`researchforge kaggle scheduler-install ${p.slug} --interval-hours ${hours}\` for\n${p.location}` + (s.installed && !s.targets_this_dir ? `\n\nThis REPLACES the existing job that writes to ${s.target_dir}.` : "")
+    : `Remove launchd job ${s.label}?\n\nRuns \`researchforge kaggle scheduler-uninstall ${p.slug}\`. Background sensors stop until reinstalled.`;
+  if (!confirm(msg)) return;
+  act("sched:" + p.id, () => api("/api/scheduler", { project: p.id, enabled: enable, interval_hours: hours }), enable ? "Scheduler installed" : "Scheduler removed");
+}
+document.getElementById("project-select").addEventListener("change", e => go({ p: e.target.value, n: "" }));
+document.getElementById("show-copies").addEventListener("change", e => { S.showCopies = e.target.checked; lsSet("rf.showCopies", S.showCopies ? "1" : "0"); render(); });
+let qTimer;
+document.getElementById("search").addEventListener("input", e => { clearTimeout(qTimer); qTimer = setTimeout(() => go({ q: e.target.value }, true), 150); });
+document.addEventListener("focusout", e => { if (S.renderPending && e.target.closest && e.target.closest("#content")) setTimeout(() => { if (S.renderPending) render(); }, 0); });
+document.addEventListener("input", e => {
+  const ds = e.target.dataset || {};
+  if (ds.ans) S.ans[ds.ans] = e.target.value;
+  if (ds.wiz && S.wiz[ds.art] && e.target.type !== "checkbox" && e.target.type !== "radio" && e.target.tagName !== "SELECT") wset(S.wiz[ds.art], ds.wiz, e.target.value);
+  if (ds.cfg) {  // unsaved Run configs edit: kept across refreshes until saved or discarded
+    const b = S.cfg[ds.pid] = S.cfg[ds.pid] || {};
+    if (String(e.target.value) === String(ds.orig)) delete b[ds.cfg]; else b[ds.cfg] = e.target.value;
+    if (!Object.keys(b).length) delete S.cfg[ds.pid];
+  }
+});
+document.addEventListener("keydown", e => { if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); document.getElementById("search").focus(); } });
+
+S.route = parseHash();
+document.getElementById("search").value = S.route.q;
+if (!location.hash) history.replaceState(null, "", hashOf(S.route));
+renderChrome();
+poll();
+</script>
+</body>
+</html>

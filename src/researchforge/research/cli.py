@@ -237,7 +237,7 @@ def synthesize(
         typer.Option(
             "--model",
             "-m",
-            help="Override model name (e.g. claude-opus-4-5, gemini-2.0-flash, gpt-4o).",
+            help="Override model name (e.g. claude-opus-4-5, gemini-3.6-flash, gpt-4o).",
         ),
     ] = None,
     no_import: Annotated[

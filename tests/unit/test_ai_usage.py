@@ -88,13 +88,13 @@ class TestPricing:
         spend = token_spend(
             [
                 AiCall("planning", "openai", "gpt-4o", Usage(1_000_000, 0)),
-                AiCall("planning", "ollama", "some-local-model", Usage(500_000, 0)),
+                AiCall("planning", "openai", "gpt-9-preview", Usage(500_000, 0)),
             ],
             PRICES,
         )
 
         assert spend.usd == pytest.approx(2.50)
-        assert spend.unpriced_models == ["some-local-model"]
+        assert spend.unpriced_models == ["gpt-9-preview"]
         assert spend.fully_priced is False
         # The tokens still count even though the dollars do not.
         assert spend.total_tokens == 1_500_000

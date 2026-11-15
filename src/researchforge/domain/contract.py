@@ -109,6 +109,16 @@ class ExecutionSection(BaseModel):
     screening_command: str | None = None  # Phase 1C screening stage
     test_command: str | None = None  # optional required tests, run before evaluation
     full_command: str = Field(min_length=1)
+    guard_command: str | None = Field(
+        default=None,
+        description=(
+            "A verification command that must always stay green regardless of "
+            "whether the metric improved.  It is run after every successful "
+            "benchmark stage.  A failure blocks the experiment from being kept "
+            "even if the metric improved — the improvement is real but something "
+            "else broke.  Example: 'pytest tests/ -x -q'."
+        ),
+    )
     result_file: str = "artifacts/results.json"
     timeout_minutes: int = Field(default=20, ge=1, le=1440)
     cpu_limit: float = Field(default=2, gt=0)

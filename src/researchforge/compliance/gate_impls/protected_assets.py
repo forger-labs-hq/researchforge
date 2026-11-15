@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from researchforge.compliance.gates import ComplianceGate, ComplianceResult, GateContext
 
@@ -45,7 +46,7 @@ class ProtectedAssetGate(ComplianceGate):
     def evaluate(self, ctx: GateContext) -> ComplianceResult:
         protected = list(IMPLICIT_PROTECTED) + list(ctx.policy.spec.protected_files)
 
-        violations: list[dict] = []
+        violations: list[dict[str, Any]] = []
         repo = Path(ctx.repo_root)
 
         for changed in ctx.changed_files:

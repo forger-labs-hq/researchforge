@@ -61,3 +61,7 @@ todo.md
 
 # Compressed upload copies (temp)
 assets/*_small.mp4
+# The README's demo video: only the small voiced copy is published
+assets/ResearchForgeDemo_60s.mp4
+assets/ResearchForgeDemo_60s_voice.mp4
+!assets/ResearchForgeDemo_60s_voice_small.mp4

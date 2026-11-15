@@ -101,6 +101,33 @@ class TestInitCursor:
         for name in list_packaged_rules():
             assert f"@{name}" in gateway, name
 
+    def test_the_overnight_rule_is_built_from_the_skill(
+        self, cli_runner: CliRunner, isolated_project_dir: Path
+    ) -> None:
+        """Cursor gets the same Kaggle loop as Claude Code, with no copy to drift."""
+        from researchforge.claude.installer import list_packaged_skills
+
+        cli_runner.invoke(app, ["init", "--cursor"])
+
+        rule = (isolated_project_dir / ".cursor" / "rules" / "overnight.mdc").read_text(
+            encoding="utf-8"
+        )
+        skill = list_packaged_skills()["overnight"]
+        assert rule.startswith("---\ndescription:") and 'globs: ".overnight_*/**"' in rule
+        assert "claude" not in rule.lower()
+        for command in (
+            "researchforge kaggle gather-facts",
+            "researchforge kaggle prepare-round",
+            "researchforge kaggle execute-round",
+            "researchforge kaggle resynthesize",
+            "researchforge kaggle finish",
+        ):
+            assert command in skill and command in rule, command
+        # Every section of the skill's loop survives the translation.
+        loop = skill[skill.index("### Phase 1") :]
+        headings = [ln for ln in loop.splitlines() if ln.startswith(("## ", "### "))]
+        assert headings and all(h in rule for h in headings)
+
     def test_json_reports_what_was_installed(
         self, cli_runner: CliRunner, isolated_project_dir: Path
     ) -> None:

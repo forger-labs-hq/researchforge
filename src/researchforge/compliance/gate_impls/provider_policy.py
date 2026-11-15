@@ -8,11 +8,12 @@ Provider usage is read from the ``ai_calls`` table written during execution.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 from researchforge.compliance.gates import ComplianceGate, ComplianceResult, GateContext
 
 
-def _used_providers(conn: sqlite3.Connection, experiment_id: str) -> list[dict]:
+def _used_providers(conn: sqlite3.Connection, experiment_id: str) -> list[dict[str, Any]]:
     """Return distinct provider/model pairs recorded for this experiment.
 
     ai_calls rows are keyed by project_id, not experiment_id directly, so we
@@ -46,14 +47,14 @@ class ProviderPolicyGate(ComplianceGate):
                 "No provider allow/deny list configured in policy — gate is informational only."
             )
 
-        used: list[dict] = []
+        used: list[dict[str, Any]] = []
         if self._conn is not None:
             try:
                 used = _used_providers(self._conn, ctx.project_id)
             except Exception:
                 used = []
 
-        violations: list[dict] = []
+        violations: list[dict[str, Any]] = []
         for entry in used:
             provider = entry["provider"].lower()
             if provider in denied:

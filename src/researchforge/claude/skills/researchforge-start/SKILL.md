@@ -9,6 +9,10 @@ ResearchForge is a local CLI: Claude proposes (queries, syntheses, patches);
 the Python engine validates, executes, and records. Every command supports
 `--json` — prefer it and read the structured output instead of parsing prose.
 
+Run `researchforge --version` first. If the command is missing (for example when
+these skills came from the Claude Code plugin), ask the user to run
+`pip install -U researchforge` (Python 3.12+) before anything else.
+
 ## Resume an existing project
 
 Always check state first:

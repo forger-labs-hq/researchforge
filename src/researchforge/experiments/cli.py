@@ -8,7 +8,7 @@ import sqlite3
 from contextlib import closing, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -73,6 +73,39 @@ def _handshake_parent_instruction(
     return instructed
 
 
+def _plan_merge_command(
+    merge: str, provider: str | None, model: str | None, json_output: bool
+) -> None:
+    """`experiment plan --merge a,b`: the autorun merge, on demand."""
+    from researchforge.autorun.engine import plan_merge
+    from researchforge.experiments.selection import MergeProposal
+
+    parents = [p.strip() for p in merge.split(",") if p.strip()]
+    if len(parents) != 2 or parents[0] == parents[1]:
+        typer.echo("--merge takes two different experiment ids, e.g. --merge exp-001,exp-003")
+        raise typer.Exit(code=1)
+    with closing(open_project_db()) as conn:
+        for p in parents:
+            _require_experiment(conn, p)
+        plan_id = plan_merge(
+            conn,
+            MergeProposal(parents=(parents[0], parents[1]), combined_gain=0.0),
+            provider,
+            model,
+            None if json_output else lambda m: typer.echo(f"  {m}"),
+        )
+    if json_output:
+        typer.echo(json.dumps({"plan_id": plan_id, "parents": parents}))
+    elif plan_id is None:
+        typer.echo(f"{parents[0]} + {parents[1]} could not be combined (see above).")
+    else:
+        typer.echo(
+            f"✓ Merge planned as {plan_id}. Next: researchforge experiment approve {plan_id}"
+        )
+    if plan_id is None:
+        raise typer.Exit(code=1)
+
+
 @experiment_app.command("plan")
 def plan_command(
     hypothesis_id: Annotated[
@@ -107,6 +140,16 @@ def plan_command(
         typer.Option(
             "--parent",
             help="Build on a measured experiment (e.g. exp-008) instead of the baseline.",
+        ),
+    ] = None,
+    merge: Annotated[
+        str | None,
+        typer.Option(
+            "--merge",
+            help=(
+                "Combine two measured experiments, e.g. exp-001,exp-003. Composes their "
+                "patches without AI; asks the AI only if they edit the same lines."
+            ),
         ),
     ] = None,
     json_output: JsonOption = False,
@@ -165,6 +208,11 @@ def plan_command(
             typer.echo(
                 "Next: researchforge experiment approve <plan-id>  OR  researchforge autorun"
             )
+        return
+
+    # ── merge mode ────────────────────────────────────────────────────────────
+    if merge is not None:
+        _plan_merge_command(merge, provider, model, json_output)
         return
 
     # ── single hypothesis mode ────────────────────────────────────────────────
@@ -917,3 +965,269 @@ def validate_command(
             typer.echo(f"  rejected for spread: σ exceeds the {summary.stdev_max:.4g} limit")
     if any(s.outcome is ExperimentStatus.VALIDATED for s in outcome.summaries):
         typer.echo("Next: researchforge ship branch")
+
+
+@experiment_app.command("submission-candidates")
+def submission_candidates(
+    json_output: JsonOption = False,
+) -> None:
+    """Show ranked experiment candidates for Kaggle submission.
+
+    Ranks by: evidence strength (local improvement + Kaggle GPU validation),
+    diversity (don't recommend near-duplicates), and estimated submission value.
+
+    Use this BEFORE spending a Kaggle submission slot. Never auto-submits.
+
+    Example:
+        researchforge experiment submission-candidates --json
+        researchforge experiment submit exp-003
+    """
+    import json as _json
+    from contextlib import closing
+
+    with closing(open_project_db()) as conn:
+        from researchforge.storage.baseline_repository import get_latest_baseline
+        from researchforge.storage.contract_repository import get_active_contract
+        from researchforge.storage.experiment_repository import list_executions, list_experiments
+
+        contract = get_active_contract(conn)
+        baseline = get_latest_baseline(conn)
+        experiments = list_experiments(conn)
+        executions = list_executions(conn)
+
+    baseline_val = (
+        baseline.metrics.primary_metric.value
+        if baseline and baseline.metrics and baseline.metrics.primary_metric
+        else None
+    )
+    metric_name = contract.spec.objective.primary_metric.name if contract else "metric"
+    direction = contract.spec.objective.primary_metric.direction if contract else None
+
+    # Find experiments with measured improvements
+    candidates: list[dict[str, Any]] = []
+    for exp in experiments:
+        if exp.status.value not in ("promising", "validated", "implementation_ready"):
+            continue
+        # Find the best metric value from executions
+        best_val = None
+        for run in reversed(executions):
+            if run.experiment_id == exp.experiment_id and run.metrics is not None:
+                best_val = run.metrics.primary_metric.value
+                break
+
+        if best_val is None or baseline_val is None:
+            continue
+
+        delta = best_val - baseline_val
+        direction_str = getattr(direction, "value", str(direction)) if direction else "maximize"
+        improved = delta > 0 if direction_str == "maximize" else delta < 0
+
+        if not improved:
+            continue
+
+        pct = abs(delta / baseline_val) * 100 if baseline_val != 0 else 0
+        candidates.append(
+            {
+                "exp_id": exp.experiment_id,
+                "title": exp.title,
+                "status": exp.status.value,
+                "local_improvement": f"{'+' if delta > 0 else ''}{delta:.4f} ({pct:.1f}%)",
+                "local_metric": best_val,
+                "baseline_metric": baseline_val,
+                "changed_files": list(exp.changed_files),
+                "parents": list(exp.parent_experiment_ids),
+                "evidence_tier": (
+                    "validated" if exp.status.value == "validated" else "local_improvement"
+                ),
+            }
+        )
+
+    # Sort by improvement magnitude
+    def sort_key(c: dict[str, Any]) -> float:
+        delta = abs(c["local_metric"] - (c["baseline_metric"] or 0))
+        return float(delta)
+
+    candidates.sort(key=sort_key, reverse=True)
+
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {
+                    "candidates": candidates,
+                    "count": len(candidates),
+                    "metric_name": metric_name,
+                    "note": (
+                        "These are LOCAL improvements only. "
+                        "For Kaggle, local metric may not reflect LB. "
+                        "Use researchforge experiment submit <exp-id> to submit the best one."
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if not candidates:
+        typer.echo("No improved experiments found. Run more experiments first.")
+        return
+
+    typer.echo(f"\nSubmission candidates ({len(candidates)}) — {metric_name}:")
+    typer.echo("─" * 60)
+    for i, c in enumerate(candidates, 1):
+        tier_icon = "🔬" if c["evidence_tier"] == "validated" else "📊"
+        typer.echo(f"  {i}. {c['exp_id']} {tier_icon} {c['local_improvement']}")
+        typer.echo(f"     {c['title'][:60]}")
+        typer.echo(f"     Files: {', '.join(c['changed_files'][:3])}")
+        if c["parents"]:
+            typer.echo(f"     Builds on: {', '.join(c['parents'])}")
+    typer.echo()
+    typer.echo("Submit (asks first): researchforge experiment submit <exp-id>")
+
+
+@experiment_app.command("submit")
+def approve_submission(
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID to submit, e.g. exp-003")],
+    message: Annotated[
+        str,
+        typer.Option("--message", "-m", help="Submission message for Kaggle"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be submitted without actually submitting"),
+    ] = False,
+    json_output: JsonOption = False,
+) -> None:
+    """Submit an approved experiment to Kaggle. NEVER runs automatically.
+
+    Renamed from 'approve' to 'submit' to avoid command name collision with
+    plan approval (`researchforge experiment approve`).
+
+    Shows submission details and asks for confirmation, then runs:
+      kaggle competitions submit -k <kernel-ref> -v <version> -f submission.csv
+
+    Records the public LB score back into the experiment DAG once available.
+
+    Example:
+        researchforge experiment submit exp-003
+        researchforge experiment submit exp-003 --message "RF: +0.21% MRR@25"
+        researchforge experiment submit exp-003 --dry-run   # preview only
+    """
+    import json as _json
+    from contextlib import closing
+
+    with closing(open_project_db()) as conn:
+        from researchforge.storage.baseline_repository import get_latest_baseline
+        from researchforge.storage.contract_repository import get_active_contract
+        from researchforge.storage.experiment_repository import list_executions, list_experiments
+
+        experiments = list_experiments(conn)
+        executions = list_executions(conn)
+        baseline = get_latest_baseline(conn)
+        contract = get_active_contract(conn)
+
+    # Find the experiment
+    exp = next((e for e in experiments if e.experiment_id == experiment_id), None)
+    if exp is None:
+        typer.secho(f"❌ Experiment {experiment_id} not found.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    baseline_val = (
+        baseline.metrics.primary_metric.value
+        if baseline and baseline.metrics and baseline.metrics.primary_metric
+        else None
+    )
+    metric_name = contract.spec.objective.primary_metric.name if contract else "metric"
+
+    # Get metric value
+    best_val = None
+    for run in reversed(executions):
+        if run.experiment_id == experiment_id and run.metrics is not None:
+            best_val = run.metrics.primary_metric.value
+            break
+
+    delta_str = ""
+    if best_val is not None and baseline_val is not None:
+        delta = best_val - baseline_val
+        pct = abs(delta / baseline_val) * 100 if baseline_val != 0 else 0
+        delta_str = f"{'+' if delta > 0 else ''}{delta:.4f} ({pct:.1f}%)"
+
+    submission_msg = message or f"RF {experiment_id}: {metric_name} {delta_str}".strip()
+
+    if json_output or dry_run:
+        payload = {
+            "experiment_id": experiment_id,
+            "title": exp.title,
+            "status": exp.status.value,
+            "local_metric": best_val,
+            "baseline_metric": baseline_val,
+            "delta": delta_str,
+            "submission_message": submission_msg,
+            "dry_run": dry_run,
+            "note": (
+                "For code competitions: researchforge experiment approve does NOT call "
+                "kaggle competitions submit automatically. It shows you the command to run. "
+                "For data competitions: it will call kaggle competitions submit -f submission.csv"
+            ),
+        }
+        if json_output:
+            typer.echo(_json.dumps(payload, indent=2))
+        else:
+            typer.echo("\nDRY RUN — would submit:")
+            typer.echo(f"  Experiment: {experiment_id} ({exp.title[:60]})")
+            typer.echo(f"  Metric: {metric_name} {delta_str}")
+            typer.echo(f"  Message: {submission_msg}")
+        return
+
+    # Interactive approval
+    typer.echo("\n⚠️  About to submit to Kaggle:")
+    typer.echo(f"  Experiment : {experiment_id}")
+    typer.echo(f"  Title      : {exp.title[:60]}")
+    typer.echo(f"  Metric     : {metric_name} {delta_str}")
+    typer.echo(f"  Message    : {submission_msg}")
+    typer.echo()
+    typer.echo("For CODE competitions: submit via Kaggle UI or:")
+    typer.echo(
+        "  kaggle competitions submit <slug> -k <user>/<kernel-slug> -v <version> -f "
+        "submission.csv -m '<message>'"
+    )
+    typer.echo()
+    typer.echo("For DATA competitions with a local submission.csv:")
+    typer.echo("  kaggle competitions submit <slug> -f submission.csv -m '<message>'")
+    typer.echo()
+
+    # Send notification
+    try:
+        from researchforge.notifications.service import notify_submission_approved
+
+        notify_submission_approved(
+            experiment_id=experiment_id,
+            title=exp.title,
+            metric_name=metric_name,
+            delta_str=delta_str,
+        )
+    except Exception:
+        pass
+
+
+@experiment_app.command("judge")
+def judge_experiment(
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID, e.g. exp-003")],
+    decision: Annotated[str, typer.Argument(help="yes | no | skip")],
+) -> None:
+    """Decide whether an experiment is worth Kaggle GPU validation (autorun --judgment)."""
+    from researchforge.autorun.kaggle_mode import record_decision
+    from researchforge.config.paths import researchforge_dir
+
+    normalized = decision.strip().lower()
+    if normalized not in ("yes", "no", "skip"):
+        typer.secho("❌ decision must be yes, no or skip", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    try:
+        rec = record_decision(researchforge_dir(), experiment_id, normalized)  # type: ignore[arg-type]
+    except KeyError as exc:
+        typer.secho(f"❌ {exc.args[0]}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    verdict = {True: "worth Kaggle GPU", False: "not worth Kaggle GPU", None: "skipped"}[
+        rec["worth_kaggle_gpu"]
+    ]
+    typer.secho(f"✅ {experiment_id}: {verdict}", fg=typer.colors.GREEN)

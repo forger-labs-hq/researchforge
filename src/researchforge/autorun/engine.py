@@ -17,10 +17,10 @@ import copy
 import sqlite3
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -80,6 +80,9 @@ from researchforge.storage.project_repository import get_project
 from researchforge.utils.progress import LiveProgress
 
 PROGRESS_SEPARATOR = "─" * 60
+
+if TYPE_CHECKING:
+    from researchforge.autorun.kaggle_mode import JudgeFn
 
 ProgressFn = Callable[[str], None]
 
@@ -146,6 +149,7 @@ class AutorunConfig:
     observe: bool = False  # read each run's logs into an observation
     resynthesize: bool = True  # generate new hypotheses each round
     yes: bool = False  # skip the round-1 approval gate
+    ask_every_plan: bool = False  # consult the gate before every plan, not only the first
     provider: str | None = None  # AI provider for synthesis + planning
     model: str | None = None  # AI model override
 
@@ -164,8 +168,17 @@ class AutorunConfig:
                 "resynthesize": self.resynthesize,
                 "provider": self.provider,
                 "model": self.model,
+                "kaggle": self.kaggle,
+                "judgment": self.judgment,
             }
         )
+
+    dry_run: bool = False  # preview only — do not execute anything
+    no_metric_gate: bool = False  # record every result; a local metric is a signal, not a gate
+    kaggle: bool = False  # evidence tiers + Kaggle GPU decisions (autorun/kaggle_mode.py)
+    judgment: bool = False  # decide Kaggle GPU validation per experiment instead of by rule
+    # Interactive judge for --judgment; None = queue non-blocking questions instead.
+    judge: JudgeFn | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +832,8 @@ def run_single_plan(
     stall: int | None,
     on_progress: ProgressFn | None = None,
     gate: ApprovalGate | None = None,
+    *,
+    metric_gate: bool = True,
 ) -> tuple[list[Experiment], list[Experiment], list[Experiment]]:
     """Run one plan. Returns its (promising, rejected, failed) experiments.
 
@@ -856,6 +871,8 @@ def run_single_plan(
 
     try:
         prep, run = start_run(conn, plan_id)
+        if not metric_gate:
+            prep = replace(prep, settings=prep.settings.model_copy(update={"metric_gate": False}))
         # Each experiment is a full install-and-benchmark cycle, so this is the
         # longest stretch of the round by far. Show the stage it is on.
         with LiveProgress(
@@ -1018,6 +1035,14 @@ def resynthesize_hypotheses(
     if log_content:
         bundle = _log_instruction(bundle, log_content)
 
+    from researchforge.kaggle.hypothesis_pool import leads_instructions
+
+    leads = leads_instructions(conn)
+    if leads:
+        bundle = copy.deepcopy(bundle)
+        bundle.instructions = [*bundle.instructions, *leads]
+        _report(on_progress, f"  Including {len(leads) - 2} Kaggle pool lead(s).")
+
     try:
         landscape_yaml, hypotheses_yaml = ai_synthesize(bundle, ai_provider)
     except ValueError as exc:
@@ -1044,6 +1069,13 @@ def resynthesize_hypotheses(
             f"on record ({', '.join(sorted(set(additions.restated)))}) — skipped.",
         )
     _report(on_progress, f"  ✓ {len(additions.added)} new hypothesis(es)")
+    if additions.added:
+        try:
+            from researchforge.notifications.service import notify_new_hypotheses
+
+            notify_new_hypotheses(len(additions.added), additions.added, project_name=project.id)
+        except Exception:
+            pass  # notifications must never block the loop
     return additions.added
 
 
@@ -1334,7 +1366,9 @@ def _run_autorun(
         promising: list[Experiment] = []
         rejected: list[Experiment] = []
         failed: list[Experiment] = []
-        first_plan_gate = gate if (round_num == 1 and not config.yes) else None
+        first_plan_gate = (
+            gate if config.ask_every_plan or (round_num == 1 and not config.yes) else None
+        )
 
         for index, plan_id in enumerate(plan_ids):
             if budget_exhausted():
@@ -1349,7 +1383,8 @@ def _run_autorun(
                     plan_id,
                     config.stall,
                     on_progress,
-                    gate=first_plan_gate if index == 0 else None,
+                    gate=first_plan_gate if index == 0 or config.ask_every_plan else None,
+                    metric_gate=not config.no_metric_gate,
                 )
             except AutorunDeclined:
                 result.stop_reason = "plan not approved"
@@ -1359,6 +1394,11 @@ def _run_autorun(
             promising.extend(plan_promising)
             rejected.extend(plan_rejected)
             failed.extend(plan_failed)
+            _notify_experiment_results(conn, plan_promising + plan_rejected + plan_failed, loop)
+            if config.kaggle or config.judgment:
+                _record_kaggle_evidence(
+                    conn, plan_promising + plan_rejected + plan_failed, loop, config, on_progress
+                )
 
         previous_best = best_value
         best_experiment, best_value = get_current_best(conn, loop.baseline_value, loop.direction)
@@ -1442,3 +1482,82 @@ def _run_autorun(
         result.stop_reason = "completed all rounds"
     _persist(state, result, result.total_duration_seconds)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+
+def _notify_experiment_results(
+    conn: sqlite3.Connection, experiments: list[Experiment], loop: _LoopContext
+) -> None:
+    """Push one notification per finished experiment: its measured delta and status.
+
+    Errors are swallowed — a notification must never stop the loop.
+    """
+    if not experiments:
+        return
+    try:
+        from researchforge.notifications.service import Notification, send_notification
+
+        values = measured_values(list_executions(conn))
+        for exp in experiments:
+            value = values.get(exp.experiment_id)
+            status = exp.status.value
+            if value is not None and loop.baseline_value:
+                gain = gain_over_baseline(value, loop.baseline_value, loop.direction)
+                delta = f"{loop.metric_name} {value:.4f} ({gain:+.4f} vs baseline)"
+                improved = gain > 0
+            else:
+                delta = "no metric measured"
+                improved = False
+            icon = "✅" if improved else "❌" if status.startswith(("rejected", "failed")) else "⚠️"
+            send_notification(
+                Notification(
+                    title=f"RF experiment: {exp.experiment_id}",
+                    message=f"{icon} {exp.title[:50]} → {delta} [{status}]",
+                    tags=["white_check_mark" if improved else "x"],
+                    priority="default",
+                )
+            )
+    except Exception:
+        pass
+
+
+def _record_kaggle_evidence(
+    conn: sqlite3.Connection,
+    experiments: list[Experiment],
+    loop: _LoopContext,
+    config: AutorunConfig,
+    on_progress: ProgressFn | None,
+) -> None:
+    """Tag each finished experiment with evidence tier and a Kaggle GPU decision.
+
+    Errors are reported, never raised — evidence bookkeeping must not stop the loop.
+    """
+    if not experiments:
+        return
+    try:
+        from researchforge.autorun import kaggle_mode
+
+        state_dir = loop.log.parent
+        records = kaggle_mode.assess(
+            conn, experiments, baseline_value=loop.baseline_value, direction=loop.direction
+        )
+        if config.judgment:
+            kaggle_mode.apply_judgment(state_dir, records, config.judge)
+        kaggle_mode.save_evidence(state_dir, records)
+        for rec in records:
+            worth = {
+                True: "worth Kaggle GPU",
+                False: "not worth Kaggle GPU",
+                None: "awaiting your call",
+            }[rec.worth_kaggle_gpu]
+            _report(
+                on_progress,
+                f"  🧭 {rec.experiment_id}: {rec.evidence_tier}, local metric "
+                f"{rec.metric_confidence} confidence — {worth}",
+            )
+    except Exception as exc:
+        _report(on_progress, f"  ⚠️  Kaggle evidence not recorded: {type(exc).__name__}: {exc}")

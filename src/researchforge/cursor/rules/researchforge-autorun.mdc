@@ -89,6 +89,14 @@ researchforge research synthesize --from-results
 
 Follow the researchforge-hypotheses skill, then return to step 1.
 
+## Unattended (no chat open)
+
+When the person wants the loop to keep running without this chat, point them to
+`researchforge auto-run settings --on --driver claude|cursor|byok`, then
+`researchforge auto-run service`.
+Each plan it writes waits for their **Approve plan**. A standing approval is something they
+type themselves with `researchforge auto-run approval standing`. Never run that for them.
+
 ## Stopping
 
 You are the loop's stopping condition here. Stop and tell the user when the

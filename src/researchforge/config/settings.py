@@ -33,7 +33,7 @@ DEFAULT_MODEL_PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-4": ModelPrice(input=3.0, output=15.0),
     "claude-haiku-4": ModelPrice(input=0.80, output=4.0),
     "claude-3-5-haiku": ModelPrice(input=0.80, output=4.0),
-    "gemini-2.0-flash": ModelPrice(input=0.10, output=0.40),
+    "gemini-3.6-flash": ModelPrice(input=0.10, output=0.40),
     "gemini-2.5-flash": ModelPrice(input=0.30, output=2.50),
     "gemini-2.5-pro": ModelPrice(input=1.25, output=10.0),
     "gpt-4o-mini": ModelPrice(input=0.15, output=0.60),
@@ -58,6 +58,9 @@ class ResearchSettings(BaseModel):
     hypothesis_max: int = Field(default=7, ge=1)
     report_dir: str = "reports"
     screening_reject_margin_pct: float = Field(default=10.0, ge=0.0)
+    # False = `autorun --no-metric-gate`: the local metric is a signal, not a gate —
+    # nothing is rejected for a worse metric, only for violated hard constraints.
+    metric_gate: bool = True
     tradeoff_material_pct: float = Field(default=5.0, ge=0.0)
     analytics_enabled: bool = False  # opt-in, local-only (spec §20)
     research_output_dir: str = ".researchforge/research-output"  # `paper package` target

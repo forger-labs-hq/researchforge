@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import traceback
-from typing import Literal
+from typing import Any, Literal
 
 from researchforge.compliance.gate_impls.human_approval import HumanApprovalGate
 from researchforge.compliance.gate_impls.protected_assets import ProtectedAssetGate
@@ -92,7 +92,7 @@ def run_compliance(
     repo_root: str,
     policy: LoadedPolicy,
     conn: sqlite3.Connection | None = None,
-    extra: dict | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> ComplianceRun:
     """Evaluate all gates for the given checkpoint and return a ComplianceRun."""
     ctx = GateContext(

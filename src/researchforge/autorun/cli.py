@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -15,6 +15,7 @@ from researchforge.autorun.engine import (
     PlanPreview,
     target_progress_pct,
 )
+from researchforge.autorun.kaggle_mode import Decision, Evidence
 from researchforge.storage.db import open_project_db
 from researchforge.utils.output import JsonOption
 
@@ -122,6 +123,37 @@ def autorun_command(
             help="Print the move the loop would make next and exit. No AI, nothing runs.",
         ),
     ] = False,
+    no_metric_gate: Annotated[
+        bool,
+        typer.Option(
+            "--no-metric-gate",
+            help=(
+                "Record every result instead of rejecting on the local metric — for when the "
+                "local benchmark is only a signal (e.g. Kaggle). Hard constraints still reject."
+            ),
+        ),
+    ] = False,
+    kaggle: Annotated[
+        bool,
+        typer.Option(
+            "--kaggle",
+            help=(
+                "Kaggle-aware mode: record every result (implies --no-metric-gate), tag how far "
+                "each local metric can be trusted, mark what is worth Kaggle GPU time, and list "
+                "submission candidates at the end."
+            ),
+        ),
+    ] = False,
+    judgment: Annotated[
+        bool,
+        typer.Option(
+            "--judgment",
+            help=(
+                "After each experiment, decide whether it is worth Kaggle GPU validation "
+                "(y/n/skip prompt; queued as a question when nobody is at the terminal)."
+            ),
+        ),
+    ] = False,
     json_output: JsonOption = False,
 ) -> None:
     """Run the autonomous research loop until it stalls, hits the target, or times out.
@@ -174,6 +206,11 @@ def autorun_command(
             yes=yes,
             provider=provider,
             model=model,
+            dry_run=dry_run,
+            no_metric_gate=no_metric_gate or kaggle,
+            kaggle=kaggle,
+            judgment=judgment,
+            judge=_prompt_judgment if judgment and not json_output and _interactive() else None,
         )
 
         if dry_run:
@@ -204,6 +241,11 @@ def autorun_command(
 
     _print_result(result)
     _print_next_steps(result)
+    if kaggle:
+        from researchforge.experiments.cli import submission_candidates
+
+        typer.echo()
+        submission_candidates(json_output=False)
 
 
 def _print_next_move(conn: sqlite3.Connection, config: AutorunConfig, json_output: bool) -> None:
@@ -216,8 +258,18 @@ def _print_next_move(conn: sqlite3.Connection, config: AutorunConfig, json_outpu
         typer.echo(f"Autorun blocked: {exc}", err=True)
         raise typer.Exit(code=1) from None
 
+    graph = _graph_summary(conn)
     if json_output:
-        typer.echo(json.dumps(move.as_payload(), indent=2))
+        payload = move.as_payload()
+        payload.update(
+            {
+                # The names the autorun skill reads.
+                "recommended_node": move.node_id or "baseline",
+                "next_command": move.command,
+                **graph,
+            }
+        )
+        typer.echo(json.dumps(payload, indent=2))
         return
 
     typer.echo(move.summary)
@@ -230,7 +282,40 @@ def _print_next_move(conn: sqlite3.Connection, config: AutorunConfig, json_outpu
         )
     for hypothesis_id, title in move.hypotheses:
         typer.echo(f"  {hypothesis_id}  {title}")
+    for m in graph["merge_opportunities"][:3]:
+        typer.echo(f"  Merge opportunity: {m['parent_a']} + {m['parent_b']}  ->  {m['command']}")
+    for pool in graph["kaggle_pool"]:
+        if pool["untested"]:
+            typer.echo(
+                f"  Kaggle pool: {pool['untested']} untested idea(s) — re-synthesis draws on "
+                "them when the hypotheses here run out."
+            )
     typer.echo(f"\nNext: {move.command}")
+
+
+def _graph_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Merge opportunities and the graph's state, for the dry-run payload."""
+    from researchforge.autorun.engine import _prepare, get_current_best
+    from researchforge.autorun.merges import find_merge_opportunities, is_improved
+    from researchforge.kaggle.hypothesis_pool import pool_summary
+    from researchforge.storage.experiment_repository import list_experiments
+
+    loop, _ = _prepare(conn)
+    experiments = [e.model_dump(mode="json") for e in list_experiments(conn)]
+    best, best_value = get_current_best(conn, loop.baseline_value, loop.direction)
+    return {
+        "merge_opportunities": find_merge_opportunities(experiments),
+        "dag_state": {
+            "total_experiments": len(experiments),
+            "improved": sum(1 for e in experiments if is_improved(e)),
+            "metric": loop.metric_name,
+            "baseline": loop.baseline_value,
+            "best_experiment": best.experiment_id if best is not None else None,
+            "best_value": best_value,
+        },
+        # The Kaggle overnight pool next to this project (watcher / arXiv / user ideas).
+        "kaggle_pool": pool_summary(conn),
+    }
 
 
 def _typed_approval(preview: PlanPreview) -> bool:
@@ -375,3 +460,27 @@ def _print_next_steps(result: AutorunResult) -> None:
         "  researchforge autorun --explore 0.5     # revisit under-explored branches\n"
         "  researchforge autorun --no-compound     # start every experiment fresh"
     )
+
+
+def _interactive() -> bool:
+    import sys
+
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _prompt_judgment(rec: Evidence) -> Decision:
+    """--judgment at a terminal: ask whether this result deserves Kaggle GPU time."""
+    gain = f"{rec.gain:+.4f}" if rec.gain is not None else "no measurement"
+    typer.echo(
+        f"\n🧭 {rec.experiment_id} '{rec.title}': {gain} vs baseline, "
+        f"local metric {rec.metric_confidence} confidence ({rec.evidence_tier})."
+    )
+    while True:
+        answer = typer.prompt("   Worth Kaggle GPU validation? [y/n/skip]", default="skip")
+        normalized = answer.strip().lower()
+        if normalized in ("y", "yes"):
+            return "yes"
+        if normalized in ("n", "no"):
+            return "no"
+        if normalized in ("s", "skip", ""):
+            return "skip"

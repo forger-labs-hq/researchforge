@@ -41,8 +41,49 @@ def dashboard_command(
         bool, typer.Option("--open", help="Open the dashboard in the default browser.")
     ] = False,
     json_output: JsonOption = False,
+    legacy: Annotated[
+        bool, typer.Option("--legacy", help="Force the old static HTML report (repo projects).")
+    ] = False,
+    port: Annotated[
+        int, typer.Option("--port", help="Port for the live dashboard [default: 7842]")
+    ] = 7842,
 ) -> None:
-    """Build the experiments-vs-baseline dashboard (static HTML, recorded data only)."""
+    """Open the live ResearchForge dashboard at localhost:7842.
+
+    One dashboard for every project on this machine — Kaggle overnight dirs
+    (.overnight_*/) and repo projects (.researchforge/) — found through the
+    project registries and a scan of every known workspace root, wherever you
+    run this from. Views: Home, Automation, Runs, DAG, Hypotheses,
+    Submissions, Timeline, Insights.
+
+    Pass --legacy (or any of --json / --run / --output) to write the static
+    HTML report for the repo project in the current directory.
+
+    Examples:
+        researchforge dashboard              # auto-detect, open live dashboard
+        researchforge dashboard --open       # same + open browser
+        researchforge dashboard --port 8080  # custom port
+        researchforge dashboard --legacy     # old static HTML for repo project
+    """
+    # The live dashboard discovers every project on this machine (registries +
+    # workspace scan), so it no longer depends on what the cwd contains.
+    # --json / --run / --output are report options: they imply the static report.
+    cwd = Path.cwd()
+    if not (legacy or json_output or run_id or output):
+        from researchforge.kaggle.dashboard import is_running, serve
+
+        running, dash_port = is_running(port)
+        if running:
+            url = f"http://localhost:{dash_port}"
+            typer.echo(f"✅ Dashboard already running → {url}")
+            if open_browser:
+                webbrowser.open(url)
+        else:
+            serve(port=port, open_browser=open_browser, cwd=cwd)
+        return
+
+    # --legacy path: old static HTML report for repo project
+
     from researchforge.domain.deliverable import Deliverable, DeliverableKind
     from researchforge.reporting.dashboard import build_dashboard
     from researchforge.storage.baseline_repository import get_latest_successful_baseline

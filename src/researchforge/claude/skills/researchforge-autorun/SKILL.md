@@ -25,14 +25,13 @@ This spends nothing — no AI call, no experiment runs. It returns the node the
 loop would expand, the hypotheses it would try there in ranked order, and the
 exact command to take that step:
 
-- `node` — the experiment to build on, or `null` for the baseline;
-- `hypotheses` — ranked, best candidate first;
-- `command` — run this next;
-- `retreat: true` — the only moves left are on branches that gained nothing.
-  Tell the user: this measures an idea *without* the gains already banked, which
-  is an ablation rather than progress;
-- `needs_resynthesis: true` — every hypothesis has been tried everywhere it can
-  apply. Go to step 5.
+- `recommended_node` — the experiment to build on, or `baseline`;
+- `next_command` — run this next;
+- `merge_opportunities` — if set, THIS IS THE HIGHEST PRIORITY MOVE;
+- `dag_state` — total, improved, baseline, current best.
+
+(Kaggle competitions use the `/overnight` skill and `researchforge kaggle prepare-round`,
+not this loop.)
 
 ## 2. Plan at that node
 
@@ -43,14 +42,17 @@ researchforge experiment plan hyp-002 --parent exp-008 --json
 ```
 
 The exported context's `repository` section shows the files **as `exp-008`
-leaves them**, and `applied` lists the experiments already baked into what you
-are reading. Write the change against those contents: do not re-apply the
-parent's change, and do not expect the baseline's values.
+leaves them**. Write the change against those contents.
 
-Then follow the researchforge-plan skill to write `plan.yaml` and the patches.
-Set `parent: exp-008` on every entry — on this path nothing sets it for you, and
-a patch written against the parent but imported without it will be applied to
-the baseline and fail.
+**To combine two independent improvements (merge)** — when `merge_opportunities` is set:
+
+```bash
+researchforge experiment plan --merge exp-001,exp-003 --json
+```
+
+This writes and imports the merge plan itself (both patches composed, no AI) and prints its
+`plan_id`; the AI is asked to author a combined patch only if the two edit the same lines.
+Go straight to step 3's approve and run.
 
 ## 3. Import, approve, run
 
@@ -60,9 +62,13 @@ researchforge experiment approve <plan-id>     # the user's decision
 researchforge experiment run <plan-id> --json
 ```
 
-Approval belongs to the user. Show them the plan and the worst-case wall time,
-and let them run the approve command themselves unless they explicitly approved
-it in this conversation.
+Approval belongs to the user. Show them the plan (`researchforge experiment show <plan-id> --json`)
+and the worst-case wall time, and let them run the approve command themselves unless they
+explicitly approved this plan in this conversation — only then pass `--yes`.
+
+**When the local benchmark is only a signal** (it cannot measure what the change targets),
+the unattended loop can record every result instead of rejecting on the local metric:
+`researchforge autorun --no-metric-gate`. Hard constraints still reject.
 
 ## 4. Read the result, then go back to step 1
 
@@ -70,36 +76,50 @@ it in this conversation.
 researchforge results show --json
 ```
 
-Report what was measured, including when it did not work — a rejected
-experiment is a result, not a failure to hide. Watch for a `NO CHANGE` badge:
-an experiment can inherit its parent's improvement while contributing exactly
-zero of its own.
+In unattended `autorun`, every result is also pushed to ntfy (after
+`researchforge notify setup`). Did anything improve? Does `merge_opportunities` list a pair?
 
-Then return to step 1. The next `--dry-run` accounts for what just happened.
+Then return to step 1.
 
 ## 5. When the graph is exhausted
 
-`needs_resynthesis: true` means no hypothesis has anywhere left to apply. New
-ideas have to come from what the runs measured:
+`needs_resynthesis: true` means no hypothesis has anywhere left to apply:
 
 ```bash
 researchforge research synthesize --from-results
 ```
 
-Follow the researchforge-hypotheses skill, then return to step 1.
+Then return to step 1.
+
+## Available flags
+
+```
+autorun --dry-run           Preview next round without executing. Use this every time.
+autorun --no-metric-gate    Record every result; reject only on hard constraints
+autorun --merge             Propose combining two independent winners each round
+autorun --yes               Skip the round-1 approval gate (overnight/unattended)
+autorun --max-hours N       Wall-clock budget
+autorun --max-rounds N      Hard cap on rounds
+autorun --explore N         UCB1 constant for node selection (0 = always best)
+```
+
+## Unattended (no chat open)
+
+When the person wants the loop to keep running without this chat, point them to
+`researchforge auto-run settings --on --driver claude|cursor|byok`, then
+`researchforge auto-run service`.
+Each plan it writes waits for their **Approve plan**. A standing approval is something they
+type themselves with `researchforge auto-run approval standing`. Never run that for them.
 
 ## Stopping
 
-You are the loop's stopping condition here. Stop and tell the user when the
-objective's target is reached, when several rounds in a row produce no
-improvement, or when only retreat moves remain. Say which of those happened.
+Stop when: objective target is reached, several rounds produce no improvement,
+only retreat moves remain. Say which happened, show the best experiment, and offer
+`/researchforge-validate` then `/researchforge-ship` — both the user's decision.
 
 ## Rules
 
-- The Python engine is the boundary: never work around a validation error, a
-  protected path, or an approval gate — fix the artifact or ask the user.
-- Approvals belong to the user: never pass `--yes` or type a confirmation
-  unless the user explicitly approved that step in this conversation.
-- Ground every summary in stored data: quote only numbers returned by
-  `--json` output or files under `.researchforge/` — never invent metrics.
-- Never choose the next node yourself when `--dry-run` can tell you.
+- **Never choose the next node yourself** when `--dry-run` can tell you.
+- Approvals belong to the user — never pass `--yes` without explicit approval.
+- Ground every summary in stored data — never invent metrics.
+- The Python engine is the boundary — never work around a validation error.

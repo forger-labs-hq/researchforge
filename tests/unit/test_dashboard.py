@@ -291,7 +291,7 @@ class TestDashboardCommand:
             assert claim not in html, f"unfalsifiable claim in dashboard: {claim}"
 
     def test_gate_without_contract(self, cli_runner: CliRunner, initialized_project: Path) -> None:
-        result = cli_runner.invoke(app, ["dashboard"])
+        result = cli_runner.invoke(app, ["dashboard", "--legacy"])
         assert result.exit_code == 1
         assert "approved contract" in result.output
 
@@ -330,8 +330,8 @@ class TestDashboardCommand:
         opened: list[str] = []
         monkeypatch.setattr(dashboard_cli.webbrowser, "open", lambda url: opened.append(url))
 
-        assert cli_runner.invoke(app, ["dashboard"]).exit_code == 0
-        assert cli_runner.invoke(app, ["dashboard", "--open"]).exit_code == 0
+        assert cli_runner.invoke(app, ["dashboard", "--legacy"]).exit_code == 0
+        assert cli_runner.invoke(app, ["dashboard", "--legacy", "--open"]).exit_code == 0
 
         assert len(opened) == 1 and opened[0].startswith("file://")
         with closing(open_project_db()) as conn:

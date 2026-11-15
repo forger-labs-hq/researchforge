@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from researchforge.compliance.gates import ComplianceRun
@@ -117,7 +118,7 @@ def insert_approval(
     return approval_id
 
 
-def get_approval(conn: sqlite3.Connection, experiment_id: str) -> dict | None:
+def get_approval(conn: sqlite3.Connection, experiment_id: str) -> dict[str, Any] | None:
     """Return the active (non-revoked) approval for an experiment, or None."""
     row = conn.execute(
         "SELECT * FROM compliance_approvals WHERE experiment_id = ? AND revoked = 0",
@@ -165,7 +166,7 @@ def insert_waiver(
     return waiver_id
 
 
-def list_waivers(conn: sqlite3.Connection, experiment_id: str) -> list[dict]:
+def list_waivers(conn: sqlite3.Connection, experiment_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT * FROM compliance_waivers WHERE experiment_id = ? ORDER BY created_at",
         (experiment_id,),

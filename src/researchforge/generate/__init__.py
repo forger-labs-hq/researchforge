@@ -369,3 +369,174 @@ def dockerfile_command(
     typer.echo("  3. researchforge contract generate --force  (regenerate with Docker mode)")
     typer.echo("  4. researchforge contract approve")
     typer.echo("  5. researchforge baseline run")
+
+
+@generate_app.command("policy")
+def policy_command(
+    from_docs: Annotated[
+        Path | None,
+        typer.Option(
+            "--from-docs",
+            help=(
+                "Path to a compliance document (PDF, Markdown, text) or a folder "
+                "containing multiple compliance documents. ResearchForge reads them "
+                "and uses AI to extract rules and write policy.yaml."
+            ),
+        ),
+    ] = None,
+    existing: Annotated[
+        Path | None,
+        typer.Option(
+            "--existing",
+            help=(
+                "Point to an existing policy.yaml to import and validate. "
+                "ResearchForge copies it to .researchforge/policy.yaml."
+            ),
+            exists=True,
+            dir_okay=False,
+        ),
+    ] = None,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            "-p",
+            help="AI provider: anthropic|google|openai. Auto-detected from env when omitted.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Override model name."),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing policy.yaml.")] = False,
+    json_output: JsonOption = False,
+) -> None:
+    """Generate .researchforge/policy.yaml from your compliance documents.
+
+    \b
+    Three ways to create a policy:
+
+    1. From your compliance documents (AI reads and maps them):
+         researchforge generate policy --from-docs my-org-policy.pdf
+         researchforge generate policy --from-docs compliance/
+
+    2. Import an existing policy.yaml you already maintain:
+         researchforge generate policy --existing path/to/policy.yaml
+
+    3. Generate a safe minimal template (no AI needed):
+         researchforge generate policy
+
+    Supported formats: PDF (.pdf), Markdown (.md), plain text (.txt),
+    reStructuredText (.rst), YAML/JSON/TOML.
+
+    PDF extraction requires pypdf or pdfplumber:
+      pip install pypdf
+    """
+    import json as _json
+    import shutil
+
+    from researchforge.config.paths import researchforge_dir
+
+    root = Path.cwd()
+    rf_dir = researchforge_dir(root)
+    rf_dir.mkdir(parents=True, exist_ok=True)
+    out_path = rf_dir / "policy.yaml"
+
+    if out_path.exists() and not force:
+        typer.echo(
+            ".researchforge/policy.yaml already exists. "
+            "Use --force to overwrite, or edit it directly.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    used_ai = False
+
+    # ── 1. import an existing policy.yaml ──────────────────────────────────
+    if existing is not None:
+        import yaml
+
+        from researchforge.compliance.policy import PolicySpec
+
+        raw = existing.read_bytes()
+        data = yaml.safe_load(raw) or {}
+        PolicySpec.model_validate(data)  # validate before copying
+        shutil.copy2(existing, out_path)
+        if json_output:
+            typer.echo(_json.dumps({"policy": str(out_path), "source": str(existing)}))
+        else:
+            typer.echo(f"✓ Imported {existing} → {out_path}")
+            typer.echo("  Run `researchforge compliance policy-validate` to confirm.")
+        return
+
+    # ── 2. generate from compliance documents with AI ───────────────────────
+    content: str | None = None
+    source_note = "heuristic template — no source documents provided"
+
+    if from_docs is not None:
+        from_docs = from_docs.expanduser().resolve()
+        if not from_docs.exists():
+            typer.echo(f"Path not found: {from_docs}", err=True)
+            raise typer.Exit(code=1)
+
+        from researchforge.ai.policy_gen import collect_documents
+
+        if not json_output:
+            typer.echo(f"Reading compliance documents from {from_docs}…")
+        try:
+            docs = collect_documents(from_docs)
+        except (ValueError, RuntimeError) as exc:
+            typer.echo(f"Error reading documents: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        doc_names = [
+            str(p.relative_to(root)) if p.is_relative_to(root) else p.name for p, _ in docs
+        ]
+        source_note = ", ".join(doc_names)
+        if not json_output:
+            typer.echo(f"  {len(docs)} document(s): {source_note}")
+
+        try:
+            from researchforge.ai.policy_gen import add_source_metadata, generate_policy_from_docs
+            from researchforge.ai.service import resolve_provider
+
+            ai_provider = resolve_provider(provider_hint=provider, model_hint=model)
+            if not json_output:
+                typer.echo(f"Generating policy.yaml with {ai_provider.name}…")
+            raw_content = generate_policy_from_docs(docs, root, ai_provider)
+            content = add_source_metadata(raw_content, docs)
+            used_ai = True
+        except Exception as exc:  # noqa: BLE001
+            if not json_output:
+                typer.echo(f"AI generation failed ({exc}), using minimal template…")
+
+    # ── 3. minimal heuristic template ───────────────────────────────────────
+    if content is None:
+        from researchforge.ai.policy_gen import build_minimal_policy
+
+        if not json_output and from_docs is None:
+            typer.echo("Generating minimal policy.yaml template…")
+        content = build_minimal_policy(source_note, root)
+
+    out_path.write_text(content, encoding="utf-8")
+
+    # Validate what we wrote before declaring success
+    import yaml
+
+    from researchforge.compliance.policy import PolicySpec
+
+    parsed = yaml.safe_load(content) or {}
+    PolicySpec.model_validate(parsed)
+
+    if json_output:
+        typer.echo(
+            _json.dumps({"policy": str(out_path), "used_ai": used_ai, "source_note": source_note})
+        )
+        return
+
+    typer.echo(f"✓ Wrote {out_path}")
+    typer.echo("")
+    typer.echo("Next steps:")
+    typer.echo("  1. Review .researchforge/policy.yaml and adjust any rules")
+    typer.echo("  2. researchforge compliance policy-validate")
+    typer.echo("  3. researchforge compliance check")

@@ -331,7 +331,11 @@ def _screening_decision(
         return Decision(
             outcome=DecisionOutcome.REJECT, reason=f"hard constraint violated at screening: {names}"
         )
-    if screening_baseline is not None and screening_baseline.metrics is not None:
+    if (
+        settings.metric_gate
+        and screening_baseline is not None
+        and screening_baseline.metrics is not None
+    ):
         base_value = screening_baseline.metrics.primary_metric.value
         candidate = metrics.primary_metric.value
         margin = settings.screening_reject_margin_pct / 100.0
@@ -357,6 +361,7 @@ def _full_decision(
     constraint_results: list[ConstraintResult],
     full_baseline: BaselineRun,
     direction: MetricDirection,
+    metric_gate: bool = True,
 ) -> tuple[Decision, ExperimentStatus]:
     assert metrics is not None
     bad = violated(constraint_results)
@@ -382,6 +387,19 @@ def _full_decision(
                 ),
             ),
             ExperimentStatus.PROMISING,
+        )
+    if not metric_gate:
+        # Recorded, not judged: it stays in the graph (rejected nodes remain
+        # branchable) and is flagged for validation against the real score.
+        return (
+            Decision(
+                outcome=DecisionOutcome.INVESTIGATE,
+                reason=(
+                    f"primary metric did not improve locally ({base_value} -> {candidate}); "
+                    "metric gate off — kept for validation against the real score"
+                ),
+            ),
+            ExperimentStatus.REJECTED,
         )
     return (
         Decision(
@@ -735,8 +753,39 @@ def _run_one_experiment(
             Decision(outcome=DecisionOutcome.REJECT, reason=full.failure_reason or ""),
         )
 
+    # Guard check — must pass before we consider the metric improvement
+    guard_command = prep.contract.spec.execution.guard_command
+    if guard_command:
+        from researchforge.execution.guard import run_guard
+
+        worktree_path = (
+            prep.repo_root / ".researchforge" / "worktrees" / f"exp-{experiment.experiment_id}"
+        )
+        # fall back to repo root if the worktree was already cleaned up
+        wt = worktree_path if worktree_path.exists() else prep.repo_root
+        _phase(on_phase, "Running guard command…")
+        guard_result = run_guard(
+            guard_command,
+            wt,
+            timeout_seconds=prep.contract.spec.execution.timeout_minutes * 60.0,
+        )
+        if not guard_result.passed:
+            reason = guard_result.failure_reason()
+            full = full.model_copy(
+                update={
+                    "warnings": list(full.warnings) + [f"guard failed: {guard_command}"],
+                }
+            )
+            update_execution(conn, full)
+            return _set_experiment(
+                conn,
+                experiment,
+                ExperimentStatus.REJECTED,
+                Decision(outcome=DecisionOutcome.REJECT, reason=reason),
+            )
+
     decision, final_status = _full_decision(
-        full.metrics, full.constraints, prep.baseline, direction
+        full.metrics, full.constraints, prep.baseline, direction, prep.settings.metric_gate
     )
     full = full.model_copy(update={"decision": decision})
     update_execution(conn, full)

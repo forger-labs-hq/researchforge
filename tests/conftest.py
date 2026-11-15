@@ -18,9 +18,28 @@ RepoFactory = Callable[..., Path]
 @pytest.fixture(autouse=True)
 def _isolated_researchforge_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the global registry/hub out of the real home dir and never
-    auto-spawn hub server processes from tests."""
+    auto-spawn hub server processes from tests. HOME is not redirected here,
+    so the automatic skill refresh must not touch the real ~/.claude either."""
     monkeypatch.setenv("RESEARCHFORGE_HOME", str(tmp_path / "rf-home"))
     monkeypatch.setenv("RESEARCHFORGE_NO_HUB", "1")
+    monkeypatch.setenv("RESEARCHFORGE_NO_SKILL_REFRESH", "1")
+    # Alerts from tests must never reach the person's phone or their alert history.
+    from researchforge.notifications import service
+
+    monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    monkeypatch.setattr(service, "_NOTIFY_CONFIG_PATH", tmp_path / "rf-notify" / "notify.json")
+    monkeypatch.setattr(service, "_NOTIFICATION_LOG", tmp_path / "rf-notify" / "log.jsonl")
+    monkeypatch.setattr(service, "_send_ntfy", lambda notif: True)
+    monkeypatch.setattr(service, "_send_telegram", lambda notif: True)
+    # Projects a test registers must not appear on the person's dashboard.
+    from researchforge.kaggle import workspace
+
+    registry = tmp_path / "rf-config" / "overnight_registry.json"
+    monkeypatch.setattr(workspace, "registry_path", lambda: registry)
+    # Never ask Kaggle's API about a competition from a test.
+    from researchforge.kaggle import kernel_watcher
+
+    monkeypatch.setattr(kernel_watcher, "_max_daily", lambda artifacts_dir: None)
 
 
 @pytest.fixture

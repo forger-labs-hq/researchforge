@@ -170,6 +170,66 @@ def build_commit_message(ship: ShipPreparation, preship: ExperimentExecution) ->
     return "\n".join(lines) + "\n"
 
 
+def _pick_best_validated(
+    conn: sqlite3.Connection,
+    candidates: list[Experiment],
+) -> Experiment | None:
+    """From a list of VALIDATED experiments, return the one with the best mean metric.
+
+    Uses validation execution records to compute means. Returns None if no metric
+    data is available (caller falls back to raising ShipBlockedError).
+
+    Direction (maximize / minimize) is inferred from each candidate's run. If
+    experiments share a plan (same run), the direction is consistent. If they differ,
+    we compare by raw mean value and pick the highest (safe for maximize; for minimize
+    the user should pass an explicit experiment_id).
+    """
+    best_experiment: Experiment | None = None
+    best_value: float | None = None
+    direction_is_minimize: bool = False
+
+    for exp in candidates:
+        runs = [r for r in list_runs(conn) if r.plan_id == exp.plan_id]
+        if not runs:
+            continue
+        run = runs[-1]
+        execs = [
+            e
+            for e in list_executions(conn, run_id=run.run_id, experiment_id=exp.experiment_id)
+            if e.benchmark_stage is BenchmarkStage.VALIDATION
+            and e.status is ExecutionRecordStatus.SUCCEEDED
+            and e.metrics is not None
+            and e.metrics.primary_metric is not None
+        ]
+        if not execs:
+            continue
+        values = [
+            e.metrics.primary_metric.value for e in execs if e.metrics and e.metrics.primary_metric
+        ]
+        if not values:
+            continue
+        mean_val = sum(values) / len(values)
+
+        # Infer direction from contract (best-effort; default maximize)
+        try:
+            prep = prepare_run(conn, exp.plan_id, None, allow_completed=True)
+            direction = prep.contract.spec.objective.primary_metric.direction
+            direction_is_minimize = direction is MetricDirection.MINIMIZE
+        except Exception:
+            direction_is_minimize = False
+
+        is_better = (
+            best_value is None
+            or (direction_is_minimize and mean_val < best_value)
+            or (not direction_is_minimize and mean_val > best_value)
+        )
+        if is_better:
+            best_value = mean_val
+            best_experiment = exp
+
+    return best_experiment
+
+
 def prepare_ship(
     conn: sqlite3.Connection,
     experiment_id: str | None,
@@ -199,11 +259,26 @@ def prepare_ship(
                 "No validated experiment to ship — run `researchforge validate <run-id>` first."
             )
         if len(validated) > 1:
-            ids = ", ".join(e.experiment_id for e in validated)
-            raise ShipBlockedError(
-                f"Multiple validated experiments ({ids}) — pass one explicitly: "
-                "`researchforge ship branch <experiment-id>`."
-            )
+            # Phase 5: select the best validated experiment by DAG metric value
+            # rather than raising an error. Load validation executions for each
+            # candidate and compare primary metric means.
+            best = _pick_best_validated(conn, validated)
+            if best is not None:
+                import warnings as _w
+
+                all_ids = ", ".join(e.experiment_id for e in validated)
+                _w.warn(
+                    f"Multiple validated experiments ({all_ids}). "
+                    f"Auto-selecting best: {best.experiment_id}.",
+                    stacklevel=3,
+                )
+                experiment = best
+            else:
+                ids = ", ".join(e.experiment_id for e in validated)
+                raise ShipBlockedError(
+                    f"Multiple validated experiments ({ids}) — pass one explicitly: "
+                    "`researchforge ship branch <experiment-id>`."
+                )
         experiment = validated[0]
 
     if experiment.status is ExperimentStatus.IMPLEMENTATION_READY:

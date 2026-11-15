@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from researchforge.config.paths import researchforge_dir
 
@@ -59,6 +59,21 @@ class SecurityPolicy(BaseModel):
     provenance: Literal["required", "optional", "disabled"] = "optional"
     vulnerabilities: VulnerabilityThresholds = Field(default_factory=VulnerabilityThresholds)
 
+    @field_validator("secret_scan", "dependency_scan", "sbom", "provenance", mode="before")
+    @classmethod
+    def _coerce_bool_to_scan_str(cls, v: object) -> object:
+        """Coerce AI-generated booleans to the expected string literals.
+
+        An AI model may emit ``true`` / ``false`` for scan fields despite the
+        prompt saying otherwise. Map ``True → "required"`` and
+        ``False → "disabled"`` so generation degrades gracefully.
+        """
+        if v is True:
+            return "required"
+        if v is False:
+            return "disabled"
+        return v
+
 
 class GateTiming(BaseModel):
     run: Literal["post_experiment", "pre_validation", "pre_ship"] = "post_experiment"
@@ -90,6 +105,15 @@ class PolicySpec(BaseModel):
     gates: GatesPolicy = Field(default_factory=GatesPolicy)
     commands: CommandsPolicy = Field(default_factory=CommandsPolicy)
     protected_files: list[str] = Field(default_factory=list)
+    # Provenance — which documents were used to generate this policy.
+    # Populated by `researchforge generate policy --from-docs`.
+    source_documents: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Paths to the compliance documents this policy was generated from. "
+            "Stored for audit trail — ResearchForge does not re-read them at runtime."
+        ),
+    )
 
 
 class LoadedPolicy(BaseModel):

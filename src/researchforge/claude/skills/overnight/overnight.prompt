@@ -1,0 +1,60 @@
+# Claude Code Skill: /overnight [competition]
+
+**Goal:** Improve Kaggle competition score overnight via automated experimentation.
+
+**Invocation:**
+```
+/overnight https://kaggle.com/competitions/rsna-knee-abnormality-detection
+/overnight rsna-knee-abnormality-detection
+```
+
+**Flow:**
+
+1. **Parse & Validate**
+   - Extract competition slug from URL or use as-is
+   - Validate Kaggle credentials exist
+
+2. **GPU Detection**
+   - Read competition description
+   - Detect: specialized GPU? Kaggle GPU available? Colab suggested?
+   - Present ranked options to user
+
+3. **User Selects GPU**
+   - Show: Competition GPU (if available) → Kaggle GPU → Colab → CPU
+   - Wait for selection
+
+4. **Setup Phase** (call `researchforge overnight setup <slug>`)
+   - Download competition data
+   - Find best public notebook
+   - Auto-generate experiment contract
+   - Show one-screen approval: budget, baseline CV, compute
+
+5. **User Approves**
+   - Click [Approve] to start overnight run
+
+6. **Run Phase** (call `researchforge overnight run <slug>`)
+   - Claude proposes experiments (screened by cost/feasibility)
+   - ResearchForge runs each in isolated worktree
+   - Metrics measured on frozen CV folds
+   - Decisions: keep/reject + reason
+   - Continue until time/experiment budget exhausted
+
+7. **Morning Report**
+   - Phone notification: "CV improved X→Y, 15 tried, 7 kept"
+   - Hub shows: experiment tree, failures, best variant code diff
+   - Offer: [Submit to Kaggle?] [View tree?]
+
+**Key Rules:**
+
+- **Never claim GPU**: just detect and ask
+- **Show all failures**: with honest reasons (metric hurt, constraint, timeout, etc)
+- **Keep credentials safe**: never print or log API keys
+- **Respect budget**: stop when time/experiment limit hit
+- **Reproducible**: save exact seeds, folds, code, models
+
+**Error Handling:**
+
+- No credentials → tell user how to create them
+- No kernels → explain why and suggest alternatives
+- GPU quota hit → ask about Colab or CPU fallback
+- Experiment crashes → record reason, move to next

@@ -1,0 +1,1 @@
+"""ResearchForge intelligence gathering module."""

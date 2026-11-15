@@ -140,6 +140,37 @@ def install_skills(
     return InstallReport(skills_dir=str(skills_root), results=results)
 
 
+def refresh_installed_skills(base: Path | None = None, user: bool = False) -> InstallReport | None:
+    """Bring a previous install up to date with the packaged skills.
+
+    `pip install --upgrade` replaces the packaged skills but not the copies in
+    `.claude/skills/`. Runs only where the user installed before (a manifest
+    exists), and only writes when a skill is new in this version or is an
+    unmodified older copy; user-edited files are never touched (no `force`).
+    Returns None when nothing needed updating.
+    """
+    if not manifest_path(base, user).is_file():
+        return None
+    skills_root = _skills_root(base, user)
+    manifest = load_manifest(base, user)
+    stale = False
+    for name, content in list_packaged_skills().items():
+        target = skills_root / name / "SKILL.md"
+        if not target.is_file():
+            # New in this version -> install; recorded but gone -> the user removed it.
+            stale = name not in manifest.hashes
+        else:
+            current = _sha256(target.read_bytes())
+            stale = current != _sha256(content.encode("utf-8")) and current == manifest.hashes.get(
+                name
+            )
+        if stale:
+            break
+    if not stale:
+        return None
+    return install_skills(base, force=False, user=user)
+
+
 def uninstall_skills(
     base: Path | None = None, force: bool = False, user: bool = False
 ) -> InstallReport:

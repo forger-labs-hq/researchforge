@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "researchforge",
+  "description": "ResearchForge plugins for Claude Code.",
+  "owner": {
+    "name": "Forger Labs HQ",
+    "url": "https://www.researchforgehq.com"
+  },
+  "plugins": [
+    {
+      "name": "researchforge",
+      "source": "./src/researchforge/claude",
+      "description": "Kaggle Overnight and an evidence-first research loop: frozen baselines, isolated experiments, repeated validation. Needs the CLI: pip install researchforge.",
+      "category": "data-science",
+      "homepage": "https://www.researchforgehq.com"
+    }
+  ]
+}
