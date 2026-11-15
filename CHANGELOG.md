@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Dashboard: projects that need you are no longer listed as Idle.** The project picker now
+  groups projects as **Needs you** (questions waiting, paused, or a run stalled), **Active**
+  (running or watched) and **Idle**. Before, a competition with a question waiting was filed
+  under Idle even though its watcher kept running.
+
 ## 0.4.0 — Kaggle overnight, background sensors and a live dashboard (2026-11-15)
 
 0.3.0 was never published to PyPI; this is the first release that carries it.

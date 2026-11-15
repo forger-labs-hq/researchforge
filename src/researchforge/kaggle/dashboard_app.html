@@ -367,9 +367,11 @@ function renderChrome() {
   document.getElementById("nav").innerHTML = VIEWS.map(([k, label]) =>
     `<div class="nav${S.route.view === k ? " active" : ""}" data-act="nav" data-view="${k}"><span>${label}</span><span class="count">${counts[k] ?? ""}</span></div>`).join("");
   const sel = document.getElementById("project-select");
-  const groups = { Active: [], Idle: [], Copies: [] };
+  // A project waiting on you is still live (its watcher keeps running), so it is never "Idle".
+  const NEEDS = { waiting: "questions waiting", paused: "paused", stalled: "a run stalled" };
+  const groups = { "Needs you": [], Active: [], Idle: [], Copies: [] };
   allProjects().forEach(p => {
-    const g = p.role !== "primary" ? "Copies" : ["running", "watching", "recent"].includes(p.state) ? "Active" : "Idle";
+    const g = p.role !== "primary" ? "Copies" : NEEDS[p.state] ? "Needs you" : ["running", "watching", "recent"].includes(p.state) ? "Active" : "Idle";
     if (g === "Copies" && !S.showCopies && S.route.p !== p.id) return;
     groups[g].push(p);
   });
@@ -377,7 +379,7 @@ function renderChrome() {
   for (const [g, list] of Object.entries(groups)) {
     if (!list.length) continue;
     opts.push(`<optgroup label="${g}">` + list.map(p =>
-      `<option value="${p.id}"${S.route.p === p.id ? " selected" : ""}>${esc(projectLabel(p))}</option>`).join("") + "</optgroup>");
+      `<option value="${p.id}"${S.route.p === p.id ? " selected" : ""}>${esc(projectLabel(p) + (NEEDS[p.state] && p.role === "primary" ? ` · ${NEEDS[p.state]}` : ""))}</option>`).join("") + "</optgroup>");
   }
   sel.innerHTML = opts.join("");
   sel.value = S.route.p !== "all" && byId(S.route.p) ? S.route.p : "all";
