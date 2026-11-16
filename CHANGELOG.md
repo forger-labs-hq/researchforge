@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3 — A ported notebook brings everything it attaches (2026-11-16)
+
+- **Rounds attach other notebooks' outputs, Kaggle Models, a Docker image and a GPU type**, not
+  only datasets. Top public notebooks build on all of these; a round used to attach the datasets
+  alone, so such a notebook stopped at its first missing input and spent Kaggle GPU quota for
+  nothing. `propose-from-kernel` now copies every input the notebook declares into
+  `proposal.json` (`dataset_sources`, `kernel_sources`, `model_sources`, `docker_image`,
+  `machine_shape`), `pull-kernel` lists them, and `execute-round` and `run-parallel` push them
+  with the round's notebook. A proposal written by hand can name them with the same keys.
+
 ## 0.4.2 — Code competitions run the full loop (2026-11-16)
 
 - **A code competition now gets the experiment loop, on Kaggle GPU.** Setup used to send every

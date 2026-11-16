@@ -2565,6 +2565,10 @@ def prepare_round(
             "parent_round_num": best_round.round_num if best_round else None,
             "branch_tag": "",
             "dataset_sources": "<list of 'username/dataset-slug' to attach, or [] for none>",
+            "kernel_sources": "<optional: notebooks whose outputs it reads, 'owner/notebook'>",
+            "model_sources": "<optional: Kaggle Models, 'owner/model/framework/variation/version'>",
+            "docker_image": "<optional: the Kaggle Docker image a ported notebook needs>",
+            "machine_shape": "<optional: Kaggle GPU type, e.g. 'NvidiaTeslaT4'>",
             "hypothesis": "<exact 'idea' text from hypothesis_pool this proposal tests, or empty>",
         },
         # AI self-hypothesize: Claude can add its own ideas to the pool.
@@ -3243,8 +3247,11 @@ def execute_round(
         parent_round_num=proposal_data.get("parent_round_num"),
         branch_tag=proposal_data.get("branch_tag", ""),
     )
-    # Bug #20: dataset_sources from proposal (e.g. ["username/coconut-dataset"])
-    dataset_sources = proposal_data.get("dataset_sources", [])
+    # Everything the proposal attaches to its Kaggle notebook: datasets, other notebooks'
+    # outputs, Kaggle Models, Docker image, GPU type (bug #20 was datasets alone).
+    from researchforge.kaggle.api import kernel_inputs
+
+    inputs = kernel_inputs(proposal_data)
     refused = _round_target.refusal(artifacts_dir, proposal.code_changes)
     if refused:
         typer.secho(f"❌ Not run: {refused}", fg=typer.colors.RED, err=True)
@@ -3302,10 +3309,10 @@ def execute_round(
             atomic_write_json(lock_path, {**lock_info, **live})
             _set_inflight(artifacts_dir, round_num, live)
             limit = round_time_limit_seconds(artifacts_dir)
-            # Pass dataset_sources through to the Kaggle GPU runner
-            if dataset_sources and hasattr(loop.benchmark_runner, "_run_kaggle_gpu"):
+            # Pass the notebook inputs through to the Kaggle GPU runner
+            if inputs and hasattr(loop.benchmark_runner, "_run_kaggle_gpu"):
                 rnd.full_result = loop.benchmark_runner._run_kaggle_gpu(
-                    proposal.code_changes, limit, dataset_sources=dataset_sources
+                    proposal.code_changes, limit, inputs=inputs
                 )
             else:
                 rnd.full_result = loop.benchmark_runner.run_full_benchmark(
@@ -3510,7 +3517,9 @@ def run_parallel(
             parent_round_num=proposal_data.get("parent_round_num"),
             branch_tag=proposal_data.get("branch_tag", ""),
         )
-        dataset_sources = proposal_data.get("dataset_sources", [])
+        from researchforge.kaggle.api import kernel_inputs
+
+        inputs = kernel_inputs(proposal_data)
 
         # Assign unique round number under lock
         with db_lock:
@@ -3541,9 +3550,9 @@ def run_parallel(
             if rnd.passed_screening:
                 _set_inflight(artifacts_dir, round_num, {"stage": "full"})
                 limit = round_time_limit_seconds(artifacts_dir)
-                if dataset_sources and hasattr(loop.benchmark_runner, "_run_kaggle_gpu"):
+                if inputs and hasattr(loop.benchmark_runner, "_run_kaggle_gpu"):
                     rnd.full_result = loop.benchmark_runner._run_kaggle_gpu(
-                        proposal.code_changes, limit, dataset_sources=dataset_sources
+                        proposal.code_changes, limit, inputs=inputs
                     )
                 else:
                     rnd.full_result = loop.benchmark_runner.run_full_benchmark(

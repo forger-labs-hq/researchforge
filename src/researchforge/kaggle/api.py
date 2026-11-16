@@ -243,6 +243,33 @@ def get_kaggle_username() -> str:
     )
 
 
+# What a round can attach to its Kaggle notebook, named as `kaggle kernels push` names them:
+# datasets, other notebooks' outputs, Kaggle Models, the Docker image and the GPU type.
+KERNEL_INPUT_LISTS = ("dataset_sources", "kernel_sources", "model_sources")
+KERNEL_INPUT_VALUES = ("docker_image", "machine_shape")
+
+
+def kernel_inputs(source: dict[str, Any]) -> dict[str, Any]:
+    """The notebook inputs in a proposal or a pulled notebook's metadata, deduplicated.
+
+    Only the fields that are set are returned, so ``{}`` means competition data only.
+    """
+    out: dict[str, Any] = {}
+    for key in KERNEL_INPUT_LISTS:
+        refs: list[str] = []
+        for ref in source.get(key) or []:
+            ref = str(ref).strip()
+            if ref and ref not in refs:
+                refs.append(ref)
+        if refs:
+            out[key] = refs
+    for key in KERNEL_INPUT_VALUES:
+        value = str(source.get(key) or "").strip()
+        if value:
+            out[key] = value
+    return out
+
+
 def build_kernel_metadata(
     username: str,
     kernel_slug: str,
@@ -252,14 +279,27 @@ def build_kernel_metadata(
     enable_internet: bool = False,
     title: str = "",
     dataset_sources: list[str] | None = None,
+    inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the kernel-metadata.json dict required by `kaggle kernels push`.
 
     Args:
         dataset_sources: Optional list of Kaggle dataset refs ("username/dataset-slug")
             to attach to the kernel. Leave None (or []) for competition data only.
+        inputs: Further notebook inputs (see ``kernel_inputs``): other notebooks'
+            outputs, Kaggle Models, a Docker image and a GPU type, as a public
+            notebook ported into a round needs them.
     """
-    return {
+    extra = kernel_inputs(
+        {
+            **(inputs or {}),
+            "dataset_sources": [
+                *(dataset_sources or []),
+                *((inputs or {}).get("dataset_sources") or []),
+            ],
+        }
+    )
+    meta: dict[str, Any] = {
         "id": f"{username}/{kernel_slug}",
         "title": title or kernel_slug.replace("-", " ").title(),
         "code_file": script_filename,
@@ -268,10 +308,15 @@ def build_kernel_metadata(
         "is_private": True,
         "enable_gpu": enable_gpu,
         "enable_internet": enable_internet,
-        "dataset_sources": dataset_sources or [],
+        "dataset_sources": extra.get("dataset_sources", []),
         "competition_sources": [competition_slug],
-        "kernel_sources": [],
+        "kernel_sources": extra.get("kernel_sources", []),
+        "model_sources": extra.get("model_sources", []),
     }
+    for key in KERNEL_INPUT_VALUES:
+        if key in extra:
+            meta[key] = extra[key]
+    return meta
 
 
 def push_kernel(kernel_dir: Path, timeout_seconds: int = 120) -> str:

@@ -47,6 +47,8 @@ class ExperimentSpec:
     needs_gpu: bool = False  # True = prefer GPU targets
     needs_internet: bool = False  # True = forbid internet-off targets
     dataset_sources: list[str] = field(default_factory=list)  # external Kaggle datasets
+    # Other notebooks' outputs, Kaggle Models, Docker image, GPU type (api.kernel_inputs)
+    inputs: dict[str, Any] = field(default_factory=dict)
     estimated_runtime_mins: int = 30  # for scheduling
 
     # Evidence quality
@@ -285,7 +287,7 @@ def _run_kaggle(spec: Any, decision: Any, setup: Any, timeout: Any) -> dict[str,
     runner = BenchmarkRunner(setup)
     try:
         result: BenchmarkResult = runner._run_kaggle_gpu(
-            spec.code, timeout, dataset_sources=spec.dataset_sources
+            spec.code, timeout, dataset_sources=spec.dataset_sources, inputs=spec.inputs
         )
         return {
             "target": decision.target,

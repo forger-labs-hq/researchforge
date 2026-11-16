@@ -446,8 +446,15 @@ class BenchmarkRunner:
     # ------------------------------------------------------------------
 
     def _run_kaggle_gpu(
-        self, patch_code: str, time_budget: float, dataset_sources: list[str] | None = None
+        self,
+        patch_code: str,
+        time_budget: float,
+        dataset_sources: list[str] | None = None,
+        inputs: dict[str, Any] | None = None,
     ) -> BenchmarkResult:
+        """One round as a Kaggle notebook. ``inputs`` attaches what a ported public
+        notebook needs: other notebooks' outputs, Kaggle Models, its Docker image and
+        GPU type (see ``api.kernel_inputs``)."""
         from researchforge.kaggle.api import (
             KaggleAPIError,
             build_kernel_metadata,
@@ -507,6 +514,7 @@ class BenchmarkRunner:
                 enable_internet=False,
                 title=slug,
                 dataset_sources=dataset_sources,
+                inputs=inputs,
             )
             (kernel_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
 

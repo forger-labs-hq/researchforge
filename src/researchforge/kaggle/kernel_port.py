@@ -128,17 +128,14 @@ def build_proposal(
     problem = check_syntax(code)
     if problem:
         raise ValueError(f"the script does not parse ({problem})")
-    datasets: list[str] = []
-    for ds in [str(x) for x in meta.get("dataset_sources") or []] + list(extra_datasets or []):
-        if ds and ds not in datasets:
-            datasets.append(ds)
+    from researchforge.kaggle.api import kernel_inputs
+
+    # Everything the notebook attaches goes with the round: datasets, other notebooks'
+    # outputs, Kaggle Models, and its Docker image and GPU type.
+    inputs = kernel_inputs(
+        {**meta, "dataset_sources": [*(meta.get("dataset_sources") or []), *(extra_datasets or [])]}
+    )
     notes = []
-    if meta.get("kernel_sources"):
-        notes.append(
-            "it reads other notebooks' outputs ("
-            + ", ".join(str(x) for x in meta["kernel_sources"])
-            + "), which a round cannot attach; the script may fail where it reads them"
-        )
     if not append:
         notes.append(
             "no scoring code appended: unless the notebook prints the metric itself, the round "
@@ -153,7 +150,8 @@ def build_proposal(
         "source_credit": ref,
         "parent_round_num": parent,
         "branch_tag": branch,
-        "dataset_sources": datasets,
+        "dataset_sources": inputs.pop("dataset_sources", []),
+        **inputs,
         "hypothesis": hypothesis,
     }
     return proposal, notes

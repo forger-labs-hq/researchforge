@@ -130,9 +130,10 @@ class TestProposeFromKernel:
             ],
         )  # fmt: skip
         assert out.exit_code == 0, out.output
-        assert "b/feats" in out.output  # kernel inputs a round cannot attach are named
+        assert "Notebook outputs attached: b/feats" in out.output
         prop = json.loads((d / "proposal.json").read_text())
         assert prop["dataset_sources"] == ["a/scorer", "c/candidates"]
+        assert prop["kernel_sources"] == ["b/feats"]  # the round attaches them too
         assert (prop["parent_round_num"], prop["source_credit"]) == (2, "owner/nb-480")
         code = prop["code_changes"]
         assert "run('pip install -q lib', shell=True" in code

@@ -662,8 +662,9 @@ def agent_prompt(slug: str, rounds: int) -> str:
         f"`researchforge kaggle pull-kernel {slug} <owner/notebook>`; do not ask the person "
         "to fetch it. To run a public notebook as a round, use "
         f'`researchforge kaggle propose-from-kernel {slug} <owner/notebook> --title "…"` '
-        "(add `--append <file>` for scoring code you wrote); it writes the proposal, with the "
-        "notebook's datasets attached.\n"
+        "(add `--append <file>` for scoring code you wrote); it writes the proposal with "
+        "everything the notebook attaches: datasets, other notebooks' outputs, Kaggle Models, "
+        "its Docker image and GPU type.\n"
         "Never ask the person to run a command, script or install on their computer: rounds run "
         "on the competition's chosen compute, never here. If an idea needs a step you cannot "
         "do with `researchforge kaggle` commands, skip it with "

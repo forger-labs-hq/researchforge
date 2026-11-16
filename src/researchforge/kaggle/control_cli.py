@@ -1079,10 +1079,19 @@ def pull_kernel_cmd(
             )
         else:
             typer.echo(f"   Outputs: not downloaded — {(res.stderr or res.stdout).strip()[:200]}")
-    attached = [str(x) for x in meta.get("dataset_sources") or []]
-    if attached:
-        typer.echo(f"   Attached datasets: {', '.join(attached)}")
-        typer.echo('   Attach them to a Kaggle GPU round with "dataset_sources" in proposal.json.')
+    from researchforge.kaggle.api import kernel_inputs
+
+    found = kernel_inputs(meta)
+    attached = list(found.get("dataset_sources", []))
+    for key, label in _INPUT_LABELS:
+        if found.get(key):
+            value = found[key]
+            typer.echo(f"   {label}: {', '.join(value) if isinstance(value, list) else value}")
+    if found:
+        typer.echo(
+            "   propose-from-kernel attaches all of these to the round; a proposal written by "
+            "hand names them with the same keys in proposal.json."
+        )
     if datasets and attached:
         policy = ComputePolicy.load(d)
         if policy is not None and not policy.data.can_download_locally:
@@ -1104,6 +1113,16 @@ def pull_kernel_cmd(
                     "downloaded" if res.returncode == 0 else f"failed: {res.stderr.strip()[:120]}"
                 )
                 typer.echo(f"   Dataset {ds}: {status}")
+
+
+# A notebook's inputs, as proposal.json and kernel-metadata.json name them.
+_INPUT_LABELS = (
+    ("dataset_sources", "Datasets attached"),
+    ("kernel_sources", "Notebook outputs attached"),
+    ("model_sources", "Models attached"),
+    ("docker_image", "Docker image"),
+    ("machine_shape", "GPU type"),
+)
 
 
 @kaggle_app.command("propose-from-kernel")
@@ -1180,8 +1199,10 @@ def propose_from_kernel_cmd(
         f"✅ proposal.json written from {ref} ({len(proposal['code_changes']):,} chars)",
         fg=typer.colors.GREEN,
     )
-    if proposal["dataset_sources"]:
-        typer.echo(f"   Datasets attached: {', '.join(proposal['dataset_sources'])}")
+    for key, label in _INPUT_LABELS:
+        if proposal.get(key):
+            value = proposal[key]
+            typer.echo(f"   {label}: {', '.join(value) if isinstance(value, list) else value}")
     for note in notes:
         typer.echo(f"   Note: {note}")
     typer.echo(f"   Next: researchforge kaggle execute-round {competition}")

@@ -289,4 +289,5 @@ def test_pull_kernel_gets_source_outputs_and_lists_datasets(
     assert out.exit_code == 0, out.output
     dest = tmp_path / "reference_kernels" / "nb-one"
     assert (dest / "nb.ipynb").exists() and (dest / "output" / "submission.csv").exists()
-    assert "Attached datasets: a/data" in out.output and "dataset_sources" in out.output
+    assert "Datasets attached: a/data" in out.output
+    assert "propose-from-kernel attaches all of these" in out.output
