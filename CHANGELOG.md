@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.4 — Only notebooks that wrote a submission are offered (2026-11-18)
+
+- **A notebook round is offered for submission only when it wrote a submission file.** Any
+  finished Kaggle notebook used to count, so a notebook that ran out of time and wrote no
+  `submission.csv` was offered, and approving it got a bare 400 Bad Request from Kaggle.
+  Approving such a round now looks in the notebook's Kaggle output first (older rounds kept no
+  copy): it submits when the file is there and otherwise says the notebook wrote none, without
+  calling Kaggle. The monitor withdraws open offers whose notebook output has no submission
+  file, and keeps them when Kaggle's output listing could not be read in full.
+
 ## 0.4.3 — A ported notebook brings everything it attaches (2026-11-16)
 
 - **Rounds attach other notebooks' outputs, Kaggle Models, a Docker image and a GPU type**, not

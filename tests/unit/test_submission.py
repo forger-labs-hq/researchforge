@@ -338,3 +338,94 @@ def test_a_percent_continuation_line_is_not_a_notebook_command() -> None:
     src = 'msg = ("%s of %s"\n       % (a, b))\n%matplotlib inline'
     out = cell_to_script(src)
     assert "       % (a, b))" in out and "pass  # notebook magic" in out
+
+
+# A notebook round that wrote no submission file (R49 ran out of time) has nothing
+# Kaggle takes: approving it only got a 400 Bad Request.
+
+
+def _notebook_output(
+    monkeypatch: pytest.MonkeyPatch, files: list[str] | None, log: bool = True
+) -> list[str]:
+    """Kaggle's output for the notebook: its log plus ``files``; None when it cannot be read.
+
+    ``log=False`` is a listing cut short (Kaggle rate-limits its pages)."""
+    from researchforge.kaggle import api
+
+    asked: list[str] = []
+
+    def fetch(ref: str, out: Path, **kw: object) -> list[Path]:
+        asked.append(ref)
+        if files is None:
+            return []
+        out.mkdir(parents=True, exist_ok=True)
+        for name in [f"{ref.split('/')[-1]}.log"] * log + files:
+            (out / name).write_text("x")
+        return list(out.iterdir())
+
+    monkeypatch.setattr(api, "fetch_kernel_output", fetch)
+    return asked
+
+
+def test_a_notebook_that_wrote_no_submission_is_not_submittable(tmp_path: Path) -> None:
+    d = _project(tmp_path, code=True)
+    submission.record_round_outputs(d, 49, {"kernel_ref": "me/nb", "kernel_version": 1})
+    assert not submission.submittable(d, 49)
+    assert control.offer_submission(d, 49, "public demo", None, "kaggle_gpu") is None
+    with pytest.raises(ValueError, match="nothing Kaggle takes"):
+        control.ask(d, "Submit R49 to Kaggle?", options=["yes", "no"])
+    submission.record_round_outputs(
+        d, 49, {"kernel_ref": "me/nb", "kernel_version": 1, "submission_file": "/gone/s.csv"}
+    )
+    assert submission.submittable(d, 49)  # Kaggle takes it from the notebook's output
+
+
+def test_approving_one_refuses_before_calling_kaggle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path, code=True)
+    submission.record_round_outputs(d, 49, {"kernel_ref": "me/nb", "kernel_version": 1})
+    calls = _fake_kaggle(monkeypatch, "Successfully submitted")
+    _notebook_output(monkeypatch, ["baseline_submission.csv"])
+    qid = _offer(d, 49)
+    with pytest.raises(ValueError, match="wrote no submission file"):
+        submission.answer(d, SLUG, qid, "yes")
+    assert calls == []
+
+
+def test_a_submission_it_never_kept_is_found_in_its_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path, code=True)
+    submission.record_round_outputs(d, 8, {"kernel_ref": "me/nb", "kernel_version": 3})
+    calls = _fake_kaggle(monkeypatch, "Successfully submitted")
+    _notebook_output(monkeypatch, ["submission.csv"])
+    qid = _offer(d, 8)
+    submission.answer(d, SLUG, qid, "yes")
+    assert calls[0][4:10] == ["-k", "me/nb", "-v", "3", "-f", "submission.csv"]
+    assert submission.submittable(d, 8)
+
+
+def test_stale_offers_are_withdrawn_only_when_the_output_shows_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path, code=True)
+    for n in (47, 49, 53):
+        submission.record_round_outputs(d, n, {"kernel_ref": f"me/nb{n}", "kernel_version": 1})
+        _offer(d, n)
+    good = tmp_path / "submission.csv"
+    good.write_text("x")
+    submission.record_round_outputs(
+        d, 53, {"kernel_ref": "me/nb53", "kernel_version": 1, "submission_file": str(good)}
+    )
+    asked = _notebook_output(monkeypatch, None)  # Kaggle cannot be read: keep them all
+    assert submission.withdraw_unsubmittable(d) == []
+    assert asked == ["me/nb47", "me/nb49"]  # R53 needs no look
+    _notebook_output(monkeypatch, ["baseline_submission.csv"], log=False)
+    assert submission.withdraw_unsubmittable(d) == []  # a cut-short listing proves nothing
+    _notebook_output(monkeypatch, ["baseline_submission.csv"])
+    assert submission.withdraw_unsubmittable(d) == [47, 49]
+    assert [q.answer_key for q in control.open_interactions(d)] == ["round:53"]
+    closed = [q for q in control.load_interactions(d) if q.status == "dismissed"]
+    assert all("wrote no submission file" in q.answer for q in closed)
+    assert submission.withdraw_unsubmittable(d) == []

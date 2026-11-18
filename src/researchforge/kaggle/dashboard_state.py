@@ -697,7 +697,7 @@ def _read_overnight(d: Path, slug: str, sibling_setups: list[str]) -> dict[str, 
     kept = {
         str(k)
         for k, v in (raw_outputs.items() if isinstance(raw_outputs, dict) else [])
-        if isinstance(v, dict) and (v.get("kernel_ref") or v.get("submission_file"))
+        if isinstance(v, dict) and v.get("submission_file")  # as kaggle.submission.submittable
     }
     experiments = []
     prior_best: float | None = None

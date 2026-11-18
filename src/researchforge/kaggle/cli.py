@@ -501,14 +501,15 @@ def monitor_cmd(
 
 
 def _round_followups(artifacts_dir: Path) -> None:
-    """Collect Kaggle rounds that outlived their wait, then ask about a missed best round.
+    """Collect Kaggle rounds that outlived their wait, ask about a missed best round, and
+    withdraw offers for notebook rounds that wrote nothing to submit.
 
     Runs with the submission checks (every few minutes), so a late result and its
     submission question arrive without waiting for the next full cycle.
     """
     from researchforge.kaggle import late_rounds, submission
 
-    for step in (late_rounds.collect, submission.offer_missed):
+    for step in (late_rounds.collect, submission.offer_missed, submission.withdraw_unsubmittable):
         try:
             got = step(artifacts_dir)
         except Exception as exc:  # never let a follow-up stop the monitor

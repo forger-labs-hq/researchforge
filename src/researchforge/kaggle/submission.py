@@ -48,12 +48,73 @@ def round_of(answer_key: str, question: str) -> int | None:
 
 
 def submittable(artifacts_dir: Path, round_num: int) -> bool:
-    """Whether a round left something Kaggle takes: its finished notebook or a file."""
+    """Whether a round left something Kaggle takes: a submission file it wrote.
+
+    A notebook round counts only when its run wrote one: Kaggle refuses a notebook
+    version without it (400 Bad Request), as with a notebook that ran out of time.
+    The file then comes from the notebook's output, so the kept copy may be gone.
+    """
     out = round_outputs(artifacts_dir, round_num)
     if out.get("pending"):
         return False
     file = str(out.get("submission_file") or "")
-    return bool(out.get("kernel_ref")) or bool(file and Path(file).is_file())
+    return bool(file) and (bool(out.get("kernel_ref")) or Path(file).is_file())
+
+
+def recover_notebook_file(artifacts_dir: Path, round_num: int) -> bool | None:
+    """Look in a notebook round's Kaggle output for a submission file it never kept.
+
+    Older rounds kept none, and a download can fail. True when one was found (and is
+    now recorded), False when the run's output has none, None when Kaggle could not be
+    read. The output listing comes in pages and Kaggle rate-limits it, so it is only
+    complete enough to say "none" when the run's own log (``<kernel>.log``) came too.
+    """
+    from researchforge.kaggle.api import fetch_kernel_output
+
+    out = round_outputs(artifacts_dir, round_num)
+    ref = str(out.get("kernel_ref") or "")
+    if not ref or out.get("pending"):
+        return None
+    if out.get("submission_file"):
+        return True
+    got = fetch_kernel_output(
+        ref,
+        artifacts_dir / "kernel_outputs" / ref.split("/")[-1],
+        file_pattern=r"^submission\.",
+        timeout=300,
+    )
+    written = sorted(p for p in got if p.name.startswith("submission."))
+    if not written:
+        return False if any(p.name == f"{ref.split('/')[-1]}.log" for p in got) else None
+    record_round_outputs(artifacts_dir, round_num, {**out, "submission_file": str(written[0])})
+    return True
+
+
+def withdraw_unsubmittable(artifacts_dir: Path) -> list[int]:
+    """Close open submission questions for notebook rounds that wrote no submission file.
+
+    Approving one could only fail: Kaggle refuses a notebook version that wrote no
+    submission. Older offers were made for any finished notebook. The monitor calls
+    this between its cycles; returns the rounds whose questions it closed.
+    """
+    from researchforge.kaggle import control
+
+    closed = []
+    for item in control.open_interactions(artifacts_dir):
+        if item.kind != "submission_approval":
+            continue
+        num = round_of(item.answer_key, item.question)
+        if num is None or submittable(artifacts_dir, num):
+            continue
+        if recover_notebook_file(artifacts_dir, num) is not False:
+            continue  # found one, Kaggle could not be read, or not a notebook round
+        control.dismiss(
+            artifacts_dir,
+            item.id,
+            f"withdrawn: R{num}'s notebook wrote no submission file, so Kaggle cannot score it",
+        )
+        closed.append(num)
+    return closed
 
 
 def _asked_or_submitted(artifacts_dir: Path) -> set[int]:
@@ -180,6 +241,14 @@ def submit_command(artifacts_dir: Path, slug: str, round_num: int, message: str)
             raise ValueError(
                 f"R{round_num} did not run as a Kaggle notebook, and this competition only "
                 "accepts notebook submissions; nothing was submitted"
+            )
+        if not file and recover_notebook_file(artifacts_dir, round_num):
+            file = str(round_outputs(artifacts_dir, round_num).get("submission_file") or "")
+        if not file:
+            raise ValueError(
+                f"R{round_num}'s notebook wrote no submission file (it may have run out of "
+                "time), and Kaggle only takes a notebook version that wrote one; "
+                "nothing was submitted"
             )
         return [
             "kaggle", "competitions", "submit", slug,
@@ -326,7 +395,8 @@ def _submit(artifacts_dir: Path, slug: str, round_num: int, title: str) -> str:
             raise ValueError(
                 "Kaggle refused the submission (400 Bad Request, with no reason given). The "
                 "usual causes: today's submission limit is used up (it resets at 00:00 UTC), or "
-                "for a notebook submission, Kaggle cannot re-run that notebook version. "
+                "for a notebook submission, Kaggle cannot re-run that notebook version or it "
+                "wrote no submission file. "
                 f"Kaggle said: {said[-200:]}"
             )
         raise ValueError(f"Kaggle refused the submission: {said[-300:] or proc.returncode}")

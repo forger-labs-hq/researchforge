@@ -617,8 +617,8 @@ def ask_submission(
 
     if require_output and not submittable(artifacts_dir, round_num):
         raise ValueError(
-            f"R{round_num} left nothing Kaggle takes (no kept submission file or "
-            "notebook run), so it cannot be submitted; nothing was asked"
+            f"R{round_num} left nothing Kaggle takes (it wrote no submission file), "
+            "so it cannot be submitted; nothing was asked"
         )
     item = request_interaction(
         artifacts_dir,

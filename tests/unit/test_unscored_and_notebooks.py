@@ -109,10 +109,14 @@ def test_unscored_rounds_with_a_submission_are_offered_once(tmp_path: Path) -> N
             (3, None, 0, 0, "Kernel completed but no metric found in output files"),  # older
             (4, None, 0, 0, "Exit code 1: boom"),  # a crash is not offered
             (5, None, 0, 0, UNSCORED_REASON),  # no kept output: nothing to submit
+            (6, None, 0, 0, UNSCORED_REASON),  # a notebook that wrote no submission
         ],
     )
     submission.record_round_outputs(d, 2, {"submission_file": _file(d, "a.csv")})
-    submission.record_round_outputs(d, 3, {"kernel_ref": "me/nb", "kernel_version": 1})
+    submission.record_round_outputs(
+        d, 3, {"kernel_ref": "me/nb", "kernel_version": 1, "submission_file": "/k/submission.csv"}
+    )
+    submission.record_round_outputs(d, 6, {"kernel_ref": "me/nb6", "kernel_version": 1})
     submission.record_round_outputs(d, 4, {"submission_file": _file(d, "b.csv")})
     assert [n for n, _ in submission.unscored_rounds(d)] == [2, 3]
     assert submission.offer_missed(d) == 2
@@ -176,7 +180,9 @@ def test_offer_submission_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(control_cli, "_artifacts", lambda c: d)
     run = CliRunner().invoke(kaggle_app, ["offer-submission", SLUG, "22", "--note", "claims 0.500"])
     assert run.exit_code == 1 and "nothing Kaggle takes" in run.output
-    submission.record_round_outputs(d, 22, {"kernel_ref": "me/nb", "kernel_version": 1})
+    submission.record_round_outputs(
+        d, 22, {"kernel_ref": "me/nb", "kernel_version": 1, "submission_file": "/k/submission.csv"}
+    )
     run = CliRunner().invoke(kaggle_app, ["offer-submission", SLUG, "22", "--note", "claims 0.500"])
     assert run.exit_code == 0, run.output
     (q,) = control.open_interactions(d)
