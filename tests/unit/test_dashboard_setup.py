@@ -249,16 +249,18 @@ class TestNewProject:
 
 
 class TestSteering:
-    def test_next_round_directions_are_read_then_applied(self, tmp_path: Path) -> None:
+    def test_next_round_directions_stay_until_a_round_follows_them(self, tmp_path: Path) -> None:
         d = _overnight(tmp_path)
         nxt = steering.add(d, "try a ViT next")
         keep = steering.add(d, "never use external data", "standing")
         active = steering.mark_round(d, 4)
-        assert [x.id for x in active] == [nxt.id, keep.id]
-        assert steering.load(d)[0].status == "read" and steering.load(d)[0].read_by_round == 4
-        assert [x.id for x in steering.mark_round(d, 4)] == [nxt.id, keep.id]  # same round again
-        assert [x.id for x in steering.mark_round(d, 5)] == [keep.id]
-        assert steering.load(d)[0].status == "applied"
+        assert [x.id for x in active] == [keep.id, nxt.id]  # the newest first
+        read = steering.load(d)[1]
+        assert read.status == "read" and read.read_by_round == 4
+        assert [x.id for x in steering.mark_round(d, 5)] == [keep.id, nxt.id]  # read, not followed
+        steering.record_round(d, 5, {"follows": [nxt.id]})
+        assert [x.id for x in steering.mark_round(d, 6)] == [keep.id]
+        assert steering.load(d)[1].status == "applied" and steering.load(d)[1].followed_by == [5]
         steering.remove(d, keep.id)
         assert steering.active(d) == []
 
@@ -271,7 +273,10 @@ class TestSteering:
         sent: list[str] = []
         monkeypatch.setattr(control, "notify", lambda _d, _c, msg, **_k: sent.append(msg) or True)
         x = steering.add(d, "stop tuning LightGBM")
-        assert control.person_notes(d)[0] == f"[{x.id}] For this round: stop tuning LightGBM"
+        assert control.person_notes(d)[0] == (
+            f"Up next #1 [{x.id}] Direction (head of the queue: follow it or decline it with a "
+            "reason): stop tuning LightGBM"
+        )
         assert steering.for_round(steering.active(d))[0]["reply_needed"]
         steering.reply(d, x.id, "a note from me", by="person")
         assert steering.for_round(steering.active(d))[0]["reply_needed"] and not sent
@@ -307,6 +312,178 @@ class TestSteering:
         assert _kaggle("steer", SLUG, "on it in R1", "--reply", direction["id"])[0] == 0
         assert "↳ agent: on it in R1" in _kaggle("steer", SLUG)[1]
         assert _kaggle("steer", SLUG, "--remove", "d-nope")[0] == 1
+
+
+# ── Up next: the person's queue ─────────────────────────────────────────────
+
+
+def _pool(d: Path, *ideas: str) -> None:
+    (d / "pending_hypotheses.json").write_text(
+        json.dumps([{"idea": i, "source": "kernel_watcher", "tested": False} for i in ideas])
+    )
+
+
+class TestUpNext:
+    def test_newest_first_and_reorderable(self, tmp_path: Path) -> None:
+        d = _overnight(tmp_path)
+        a, b, c = (steering.add(d, t) for t in ("try A", "try B", "try C"))
+        assert [x["id"] for x in steering.up_next(d)] == [c.id, b.id, a.id]
+        steering.reorder(d, [a.id])
+        assert [x["id"] for x in steering.up_next(d)] == [a.id, c.id, b.id]
+        with pytest.raises(KeyError):
+            steering.reorder(d, ["d-nope"])
+
+    def test_a_direction_for_n_rounds_stays_until_n_rounds_follow_it(self, tmp_path: Path) -> None:
+        d = _overnight(tmp_path)
+        x = steering.add(d, "try RL", rounds=2)
+        steering.record_round(d, 7, {"follows": [x.id]})
+        assert steering.up_next(d)[0]["rounds_left"] == 1
+        steering.record_round(d, 8, {"follows": x.id})
+        assert steering.up_next(d) == [] and steering.load(d)[0].followed_by == [7, 8]
+        with pytest.raises(ValueError):
+            steering.add(d, "x", rounds=0)
+
+    def test_the_head_is_followed_or_declined_with_a_reason(self, tmp_path: Path) -> None:
+        d = _overnight(tmp_path)
+        assert steering.check_proposal(d, {}) == ""  # nothing queued
+        old = steering.add(d, "try A")
+        new = steering.add(d, "try RL")
+        refusal = steering.check_proposal(d, {"follows": [old.id]})
+        assert new.id in refusal and "try RL" in refusal  # the newest is the head
+        assert steering.check_proposal(d, {"declines": {new.id: ""}}) == refusal  # needs a reason
+        why = {new.id: "needs 4 rollouts per task; over the 2 h limit"}
+        assert steering.check_proposal(d, {"follows": [old.id], "declines": why}) == ""
+        steering.record_round(d, 9, {"follows": [old.id], "declines": why})
+        (head,) = steering.up_next(d)  # A is done; RL still waits, with the reason
+        assert head["id"] == new.id
+        assert steering.load(d)[0].declined[0]["round"] == 9
+        assert steering.check_proposal(d, {"follows": [new.id]}) == ""
+
+    def test_pinned_ideas_come_after_directions_in_your_order(self, tmp_path: Path) -> None:
+        from researchforge.kaggle import hypothesis_pool as pool
+
+        d = _overnight(tmp_path)
+        _pool(d, "idea one", "idea two", "idea three")
+        assert [h["idea"] for h in pool.rank_untested(d, "maximize")][0] == "idea one"
+        pool.pin(d, "idea three")
+        two = pool.pin(d, "idea two", place=1)[0]
+        assert [h["idea"] for h in pool.pinned(d)] == ["idea two", "idea three"]
+        ranked = [h["idea"] for h in pool.rank_untested(d, "maximize")]
+        assert ranked == ["idea two", "idea three", "idea one"]
+        pool.set_pins(d, ["idea three", two["pin_id"]])  # by text or by id
+        assert [h["pin"] for h in pool.pinned(d)] == [1, 2]
+        with pytest.raises(ValueError, match="no untested idea"):
+            pool.pin(d, "no such idea")
+        x = steering.add(d, "try RL")
+        assert [i["kind"] for i in steering.up_next(d)] == [
+            "direction",
+            "pinned_idea",
+            "pinned_idea",
+        ]
+        steering.record_round(d, 3, {"follows": [x.id]})
+        head = steering.up_next(d)[0]
+        assert head["text"] == "idea three" and steering.check_proposal(d, {})
+        assert steering.check_proposal(d, {"hypothesis": "Idea three"}) == ""  # testing it follows
+        pool.mark_tested(d, {"hypothesis": "idea three"}, 4, "failed")
+        assert [h["idea"] for h in pool.pinned(d)] == ["idea two"]
+        pool.unpin(d, "idea two")
+        assert pool.pinned(d) == [] and steering.up_next(d) == []
+
+    def test_steered_rounds_remember_what_each_round_did(self, tmp_path: Path) -> None:
+        from researchforge.kaggle import hypothesis_pool as pool
+
+        d = _overnight(tmp_path)
+        _pool(d, "idea one")
+        pool.pin(d, "idea one")
+        rl = steering.add(d, "try RL")
+        why = {rl.id: "no GPU today"}
+        steering.record_round(d, 4, {"hypothesis": "idea one", "declines": why})
+        steering.record_round(d, 5, {"follows": [rl.id]})
+        steering.record_round(d, 6, {"title": "nothing queued any more"})
+        got = steering.steered_rounds(d)
+        assert [(g["kind"], g["how"]) for g in got[4]] == [
+            ("direction", "declined"),
+            ("pinned_idea", "followed"),
+        ]
+        assert got[4][0]["reason"] == "no GPU today"
+        assert [g["id"] for g in got[5]] == [rl.id] and 6 not in got
+        # Older directions knew only the round that read them.
+        old = steering.Direction("d-old", "try X", "next", "", status="applied", read_by_round=2)
+        steering._save(d, [*steering.load(d), old])
+        assert steering.steered_rounds(d)[2][0]["id"] == "d-old"
+
+    def test_execute_round_refuses_a_proposal_that_ignores_the_head(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        d = _overnight(tmp_path)
+        monkeypatch.setenv("RESEARCHFORGE_OVERNIGHT_DIR", str(d))
+        x = steering.add(d, "try RL")
+        (d / "proposal.json").write_text(json.dumps({"title": "t", "code_changes": "print(1)"}))
+        code, out = _kaggle("execute-round", SLUG)
+        assert code == 1 and f'"follows": ["{x.id}"]' in out
+        assert not (d / "execute_round.lock").exists()
+
+    def test_cli_rounds_order_and_pin(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        d = _overnight(tmp_path)
+        monkeypatch.setenv("RESEARCHFORGE_OVERNIGHT_DIR", str(d))
+        _pool(d, "idea one", "idea two")
+        code, out = _kaggle("steer", SLUG, "try RL", "--rounds", "3")
+        assert code == 0 and "the next 3 rounds" in out
+        first = steering.add(d, "try A")
+        rl = steering.load(d)[1]
+        assert _kaggle("steer", SLUG, "--order", rl.id)[0] == 0
+        assert steering.up_next(d)[0]["id"] == rl.id and steering.up_next(d)[1]["id"] == first.id
+        assert _kaggle("pin", SLUG, "idea two")[0] == 0
+        code, out = _kaggle("pin", SLUG)
+        assert code == 0 and "1. [p-" in out and "idea two" in out
+        assert _kaggle("pin", SLUG, "nope")[0] == 1
+        assert "Up next:" in _kaggle("steer", SLUG)[1]
+
+    def test_the_api_key_loop_is_told_once_then_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        from researchforge.kaggle.patch_proposer import PatchProposal, PatchProposer
+
+        d = _overnight(tmp_path)
+        x = steering.add(d, "try RL")
+        proposer = PatchProposer.__new__(PatchProposer)
+        proposer.setup = SimpleNamespace(artifacts_dir=d)  # type: ignore[assignment]
+        proposer._provider = object()
+        seen: list[str] = []
+        answers = [
+            PatchProposal("a", "", "", "", ""),
+            PatchProposal("b", "", "", "", "", follows=[x.id]),
+        ]
+        monkeypatch.setattr(proposer, "_build_context", lambda n: "ctx")
+        monkeypatch.setattr(proposer, "_call_ai", lambda ctx, n: seen.append(ctx) or answers.pop(0))
+        assert proposer.propose_patch(5).title == "b"
+        assert "REFUSED" in seen[1] and x.id in seen[1]
+        answers[:] = [PatchProposal("c", "", "", "", "")] * 2
+        with pytest.raises(RuntimeError, match="Proposal refused"):
+            proposer.propose_patch(6)
+
+    def test_prepare_round_hands_over_the_queue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from researchforge.kaggle import hypothesis_pool as pool
+
+        d = _overnight(tmp_path)
+        monkeypatch.setenv("RESEARCHFORGE_OVERNIGHT_DIR", str(d))
+        monkeypatch.setattr(
+            "researchforge.kaggle.patch_proposer.PatchProposer._build_context",
+            lambda self, round_num: "context",
+        )
+        _pool(d, "idea one", "idea two")
+        pool.pin(d, "idea two")
+        code, out = _kaggle("prepare-round", SLUG)
+        ctx = json.loads(out[out.index("{") :])
+        assert code == 0 and ctx["recommended_next"] == "idea two"
+        assert ctx["up_next"][0]["kind"] == "pinned_idea" and "follows" in ctx["up_next_note"]
+        assert "follows" in ctx["proposal_schema"] and "declines" in ctx["proposal_schema"]
 
 
 # ── the dashboard service ───────────────────────────────────────────────────
@@ -433,3 +610,28 @@ class TestDashboardEndpoints:
         )
         assert status == 400
         assert steering.load(d)[0].text == "try X"
+
+    def test_up_next_endpoints(self, server: Any, tmp_path: Path) -> None:
+        from researchforge.kaggle import hypothesis_pool as pool
+
+        service, port = server
+        d = _overnight(service.cwd)
+        _pool(d, "idea one", "idea two")
+        pid = next(p["id"] for p in service.state(force=True)["projects"] if p["slug"] == SLUG)
+        post = lambda body: self._post(port, "/api/steer", {"project": pid, **body}, service.token)  # noqa: E731
+        assert post({"op": "add", "text": "try A", "kind": "next", "rounds": 2})[0] == 200
+        assert post({"op": "add", "text": "try B"})[0] == 200
+        a, b = steering.load(d)[1], steering.load(d)[0]
+        status, out = post({"op": "order", "ids": [a.id]})
+        assert status == 200 and [x["id"] for x in out["up_next"]] == [a.id, b.id]
+        two = pool.pin_id("idea two")
+        status, out = post({"op": "pin", "id": two})
+        assert status == 200 and out["up_next"][-1]["id"] == two
+        project = next(p for p in service.state(force=True)["projects"] if p["id"] == pid)
+        rows = {h["title"]: h for h in project["hypotheses"]}
+        assert rows["idea two"]["pin"] == 1 and rows["idea one"]["pin"] is None
+        assert [x["text"] for x in project["overnight"]["engine_next"]] == ["idea one"]
+        assert all(e["steered"] == [] for e in project["experiments"])
+        assert rows["idea one"]["steered"] == []
+        assert post({"op": "unpin", "id": two})[0] == 200 and pool.pinned(d) == []
+        assert post({"op": "pin", "id": "p-nope"})[0] == 400

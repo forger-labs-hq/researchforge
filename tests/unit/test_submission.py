@@ -429,3 +429,36 @@ def test_stale_offers_are_withdrawn_only_when_the_output_shows_none(
     closed = [q for q in control.load_interactions(d) if q.status == "dismissed"]
     assert all("wrote no submission file" in q.answer for q in closed)
     assert submission.withdraw_unsubmittable(d) == []
+
+
+def test_submissions_without_a_count_still_use_one_up(tmp_path: Path) -> None:
+    """Four quick approvals: Kaggle gave a count after the first two, none after the rest."""
+    from datetime import datetime
+
+    d = _project(tmp_path)
+    (d / "submissions.json").write_text(json.dumps({"max_daily": 5, "submissions": []}))
+    now = datetime.now().isoformat(timespec="seconds")
+    replies = ["4 submissions remaining today.", "3 submissions remaining today.", "", ""]
+    with (d / submission.LOG_FILE).open("w") as fh:
+        for n, reply in zip((58, 57, 56, 55), replies, strict=True):
+            fh.write(json.dumps({"at": now, "round": n, "reply": reply}) + "\n")
+    left = submission.daily_allowance(d)
+    assert left is not None and (left["remaining"], left["after_round"]) == (1, 55)
+    with (d / submission.LOG_FILE).open("a") as fh:
+        fh.write(json.dumps({"at": now, "round": 53, "reply": ""}) + "\n")
+    assert "none are left after R53" in submission._limit_reached(d)
+
+
+def test_a_refusal_is_recorded_with_its_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path)
+    sub = tmp_path / "submission.csv"
+    sub.write_text("x")
+    submission.record_round_outputs(d, 7, {"submission_file": str(sub)})
+    _fake_kaggle(monkeypatch, "400 Client Error: Bad Request for url: x", code=1)
+    qid = _offer(d)
+    with pytest.raises(ValueError, match="Kaggle refused R7 "):
+        submission.answer(d, SLUG, qid, "yes")
+    (row,) = (d / submission.REFUSED_FILE).read_text().splitlines()
+    assert json.loads(row)["round"] == 7 and "400" in json.loads(row)["reply"]

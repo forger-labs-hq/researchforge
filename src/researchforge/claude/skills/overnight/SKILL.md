@@ -235,10 +235,17 @@ Read ALL fields carefully:
 - `dag_state` — what's been tried, what improved, best round so far
 - `recommended_next` — engine's suggestion for next hypothesis
 - `directions` — what the user told the loop to do, from the dashboard's **Steer** page or
-  `kaggle steer`: `standing` ones apply to every round, `next` ones to this round. They come
-  before the idea ranking. For each with `reply_needed`, answer once with
-  `researchforge kaggle steer <slug> --reply <id> "<what you will do>"` — the user reads it on
-  the dashboard. If one cannot be followed (it needs data you do not have, say), reply why.
+  `kaggle steer`: `standing` ones apply to every round; `next` ones stay until as many rounds
+  as the user asked for (`rounds_left`) have followed them. They come before the idea ranking,
+  and where two disagree the one higher in Up next wins. For each with `reply_needed`, answer
+  once with `researchforge kaggle steer <slug> --reply <id> "<what you will do>"` — the user
+  reads it on the dashboard.
+- `up_next` — the user's queue, in their order: next-round directions (newest first unless
+  they reordered them), then the ideas they pinned. **Its head comes first:** put its id in the
+  proposal's `follows` (for a pinned idea also set `hypothesis` to that idea), or, when this
+  round really cannot (it needs data or compute you do not have), give the reason in
+  `declines`: `{"<id>": "<why>"}`. The reason shows under it on the dashboard. `execute-round`
+  refuses a proposal that does neither.
 - `person_notes` — the directions again, then the user's own comments on their answers and on
   repo plans, newest first. Follow them: they outrank the idea ranking (e.g. "stop trying
   LoRA, the adapter is broken").
@@ -290,7 +297,9 @@ Create `.overnight_<slug>/proposal.json`:
   "source_credit": "<kernel title or arXiv paper>",
   "parent_round_num": <best_round_num from dag_state, or null for baseline>,
   "branch_tag": "<features|model|cv|ensemble|augmentation|merge>",
-  "hypothesis": "<the exact `idea` text from hypothesis_pool this tests, or \"\">"
+  "hypothesis": "<the exact `idea` text from hypothesis_pool this tests, or \"\">",
+  "follows": ["<ids from up_next this round follows, e.g. d-1a2b3c or p-4d5e6f>"],
+  "declines": {"<up_next id this round cannot follow>": "<why>"}
 }
 ```
 
@@ -391,7 +400,8 @@ there without a chat; their directions reach you through `prepare-round`.
 | `/overnight status` | `researchforge kaggle status <slug>` |
 | `/overnight submit` | `researchforge experiment submission-candidates` (repo projects) or `researchforge kaggle status <slug>` — then follow **Submission** below |
 | `/overnight add "<idea>"` | `researchforge kaggle add-hypothesis <slug> "<idea>"` |
-| `/overnight steer "<direction>"` — or any "focus on…", "stop doing…", "try … next" | `researchforge kaggle steer <slug> "<their words>"` (`--standing` when it should hold for every round); list with `kaggle steer <slug>`, drop one with `--remove <id>`. The dashboard's **Steer** page does the same |
+| `/overnight steer "<direction>"` — or any "focus on…", "stop doing…", "try … next" | `researchforge kaggle steer <slug> "<their words>"` (`--standing` when it should hold for every round, `--rounds N` for the next N rounds); list it and Up next with `kaggle steer <slug>`, reorder with `--order <id>,<id>`, drop one with `--remove <id>`. The dashboard's **Steer** page does the same |
+| "try this idea first", "do X before Y" about pool ideas | `researchforge kaggle pin <slug> "<exact pool idea>" [--place N]`; `--remove` unpins; `kaggle pin <slug>` lists them. Pinned ideas come after the user's directions in Up next |
 | `/overnight pause` | `researchforge kaggle pause <slug> --reason "<their reason>"` |
 | `/overnight resume` | `researchforge kaggle resume <slug>` |
 | `/overnight resynthesize` | `researchforge kaggle resynthesize <slug>` now, instead of waiting for round 5 |

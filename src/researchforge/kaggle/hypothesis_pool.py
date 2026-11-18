@@ -7,6 +7,8 @@ agree on what to try next, so the order is decided here and nowhere else.
 
 Order, most important first:
 
+0. ideas the person pinned, in the order they set (``pinned_ideas.json``; the
+   dashboard's Up next queue). Kept apart from the pool, which the watcher rewrites;
 1. ideas the user added by hand;
 2. notebooks claiming a public-LB score above our best submission, highest claim
    first. The claim is the author's word, but it is a leaderboard score, which a
@@ -25,6 +27,7 @@ from typing import Any
 from researchforge.kaggle.workspace import location_role, read_json
 
 POOL_FILE = "pending_hypotheses.json"
+PINS_FILE = "pinned_ideas.json"  # idea keys the person pinned, first = tried first
 _RELEVANCE_RANK = {"builds_on_best": 0, "new_direction": 1, "repeats_failure": 2}
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2, "blind": 3}
 
@@ -32,6 +35,82 @@ _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2, "blind": 3}
 def load_pool(artifacts_dir: Path) -> list[dict[str, Any]]:
     pool = read_json(artifacts_dir / POOL_FILE, [])
     return [h for h in pool if isinstance(h, dict)] if isinstance(pool, list) else []
+
+
+def idea_key(idea: str) -> str:
+    """How an idea is matched everywhere (mark_tested, skip_idea, pins)."""
+    return idea.strip().lower()[:60]
+
+
+def pin_id(idea: str) -> str:
+    """A short stable id for a pinned idea, for proposals to name it by."""
+    import hashlib
+
+    return "p-" + hashlib.sha1(idea_key(idea).encode()).hexdigest()[:6]
+
+
+def pinned(artifacts_dir: Path) -> list[dict[str, Any]]:
+    """The pinned ideas still waiting to be tried, in the person's order.
+
+    Each is the pool entry plus ``pin_id`` and ``pin`` (its 1-based place). A pinned
+    idea leaves the queue once it is tested or skipped.
+    """
+    keys = read_json(artifacts_dir / PINS_FILE, []) or []
+    waiting = {
+        idea_key(str(h.get("idea") or "")): h
+        for h in load_pool(artifacts_dir)
+        if h.get("idea") and not h.get("tested") and not h.get("skipped")
+    }
+    out: list[dict[str, Any]] = []
+    for key in keys if isinstance(keys, list) else []:
+        h = waiting.get(str(key))
+        if h is not None:
+            out.append({**h, "pin_id": pin_id(str(h["idea"])), "pin": len(out) + 1})
+    return out
+
+
+def _waiting_key(artifacts_dir: Path, name: str) -> str:
+    """The key of the untested pool idea named by its text or ``pin_id``; ValueError if none."""
+    name = name.strip()
+    for h in load_pool(artifacts_dir):
+        idea = str(h.get("idea") or "")
+        if not idea or h.get("tested") or h.get("skipped"):
+            continue
+        if name == pin_id(idea) or idea_key(name) == idea_key(idea):
+            return idea_key(idea)
+    raise ValueError(f"no untested idea in the pool matches {name[:80]!r}")
+
+
+def set_pins(artifacts_dir: Path, ideas: list[str]) -> list[dict[str, Any]]:
+    """Pin exactly these ideas, in this order (an empty list unpins all). Returns pinned().
+
+    An idea is named by its text or its ``pin_id``; one that is not waiting in the pool
+    is refused, so a typo never silently pins nothing.
+    """
+    from researchforge.kaggle.workspace import atomic_write_json
+
+    keys: list[str] = []
+    for name in ideas:
+        key = _waiting_key(artifacts_dir, name)
+        if key not in keys:
+            keys.append(key)
+    atomic_write_json(artifacts_dir / PINS_FILE, keys)
+    return pinned(artifacts_dir)
+
+
+def pin(artifacts_dir: Path, idea: str, place: int | None = None) -> list[dict[str, Any]]:
+    """Pin one idea at ``place`` (1-based; last when None), or move a pinned one there."""
+    key = _waiting_key(artifacts_dir, idea)
+    rest = [h["pin_id"] for h in pinned(artifacts_dir) if idea_key(h["idea"]) != key]
+    at = len(rest) if place is None else max(0, min(len(rest), place - 1))
+    return set_pins(artifacts_dir, [*rest[:at], key, *rest[at:]])
+
+
+def unpin(artifacts_dir: Path, idea: str) -> list[dict[str, Any]]:
+    key = _waiting_key(artifacts_dir, idea)
+    return set_pins(
+        artifacts_dir, [h["pin_id"] for h in pinned(artifacts_dir) if idea_key(h["idea"]) != key]
+    )
 
 
 def our_best_public_lb(artifacts_dir: Path, direction: str) -> float | None:
@@ -73,6 +152,7 @@ def rank_untested(
 
         blocked = blocked_ideas(artifacts_dir)
     our_best = our_best_public_lb(artifacts_dir, direction)
+    pins = {idea_key(h["idea"]): h for h in pinned(artifacts_dir)}
     ranked: list[tuple[tuple[int, float, int, int, int], dict[str, Any]]] = []
     for index, h in enumerate(load_pool(artifacts_dir)):
         idea = str(h.get("idea") or "")
@@ -88,9 +168,16 @@ def rank_untested(
         if gap is not None:
             entry["claim_vs_our_best"] = gap
             entry["our_best_lb"] = our_best
+        tier, within = (1 if h.get("source") == "user" else 2), 0.0
+        if gap is not None and gap > 0:
+            within = -gap
+        pinned_as = pins.get(idea_key(idea))
+        if pinned_as is not None:
+            entry["pin"], entry["pin_id"] = pinned_as["pin"], pinned_as["pin_id"]
+            tier, within = 0, float(pinned_as["pin"])
         key = (
-            0 if h.get("source") == "user" else 1,
-            -gap if gap is not None and gap > 0 else 0.0,
+            tier,
+            within,
             _CONFIDENCE_RANK.get(confidence, 1),
             _RELEVANCE_RANK.get(str(h.get("relevance") or ""), 1),
             index,

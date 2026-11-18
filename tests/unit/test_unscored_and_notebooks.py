@@ -350,7 +350,7 @@ def test_a_used_up_daily_limit_is_refused_before_calling_kaggle(
     _sent(d, 22, "Successfully submitted\n0 submissions remaining today.", datetime.now())
     left = submission.daily_allowance(d)
     assert left is not None and left["remaining"] == 0 and left["after_round"] == 22
-    with pytest.raises(ValueError, match="daily submission limit is used up: after R22"):
+    with pytest.raises(ValueError, match="limit is used up: none are left after R22"):
         submission.submit_round(d, SLUG, 21, "x")
     assert calls == []
 

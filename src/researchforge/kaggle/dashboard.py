@@ -531,13 +531,31 @@ class DashboardService:
 
     # ── steering and loop control ────────────────────────────────────────
     def action_steer(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        """Add, answer or remove a direction for the proposer."""
-        from researchforge.kaggle import steering
+        """The Up next queue: add, answer, remove or reorder directions; pin and order ideas."""
+        from researchforge.kaggle import hypothesis_pool, steering
 
         art = Path(project["overnight"]["artifacts_dir"])
         op = str(body.get("op") or "add")
+        ids = [str(i) for i in body.get("ids") or [] if str(i).strip()]
+        if op == "order":
+            steering.reorder(art, ids)
+            return {"up_next": steering.up_next(art)}
+        if op in ("pin", "unpin", "pins"):
+            if op == "pins":
+                hypothesis_pool.set_pins(art, ids)
+            elif op == "pin":
+                place = body.get("place")
+                hypothesis_pool.pin(art, str(body.get("id") or ""), int(place) if place else None)
+            else:
+                hypothesis_pool.unpin(art, str(body.get("id") or ""))
+            return {"up_next": steering.up_next(art)}
         if op == "add":
-            d = steering.add(art, str(body.get("text") or ""), str(body.get("kind") or "next"))
+            d = steering.add(
+                art,
+                str(body.get("text") or ""),
+                str(body.get("kind") or "next"),
+                rounds=int(body.get("rounds") or 1),
+            )
         elif op == "reply":
             d = steering.reply(
                 art, str(body.get("id") or ""), str(body.get("text") or ""), "person"
@@ -545,7 +563,7 @@ class DashboardService:
         elif op == "remove":
             d = steering.remove(art, str(body.get("id") or ""))
         else:
-            raise ValueError("op must be add, reply or remove")
+            raise ValueError("op must be add, reply, remove, order, pin, unpin or pins")
         return {"direction": asdict(d)}
 
     def action_loop(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:

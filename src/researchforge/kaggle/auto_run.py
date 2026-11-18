@@ -10,16 +10,19 @@ the driver it started with unless it is stopped.
 
 The watchers only fill ``pending_hypotheses.json``. Without this, a round runs only
 when someone opens a chat (Claude Code or Cursor) or runs ``kaggle run`` by hand.
-The ``auto_run_sensor`` closes that gap: each monitor cycle it checks the gates
-below and, if they all pass, starts one *launch* — up to ``rounds_per_launch``
-rounds driven by one of three drivers, unattended:
+The ``auto_run_sensor`` closes that gap: each monitor cycle — and, with
+``back_to_back`` on (the default), every few minutes between cycles — it checks the
+gates below and, if they all pass, starts one *launch*: up to ``rounds_per_launch``
+rounds driven by one of three drivers, unattended. So launches follow each other
+until a gate stops them, instead of one every few hours:
 
 * ``claude`` — headless Claude Code (``claude -p``) following the overnight skill,
   allowed only ``researchforge kaggle …`` commands and file edits in the project;
 * ``cursor`` — the Cursor agent CLI (``cursor-agent -p``) with the same prompt;
 * ``byok``   — ``researchforge kaggle run`` with an AI API key (no chat agent).
 
-Gates, all required: setup done, loop not paused, no open question, no round
+Gates, all required: setup done, loop not paused, no question that holds the loop
+(``ask --hold``; submission offers and other questions never stop it), no round
 already running, untested ideas in the pool, today's round count under
 ``max_rounds_per_day``, the Kaggle GPU cap not reached, and the driver ready
 (binary found and signed in, or its key present).
@@ -114,7 +117,8 @@ def env_file() -> Path:
 class AutoRunConfig:
     driver: str = "claude"
     rounds_per_launch: int = 2
-    max_rounds_per_day: int = 6
+    max_rounds_per_day: int = 20
+    back_to_back: bool = True  # next launch within minutes of the last, not next cycle
     max_minutes: int = 240  # a launch still running after this is stopped
     model: str = ""  # optional model id for the claude / cursor driver
     cli_path: str = ""  # optional explicit path to the claude / cursor-agent binary
@@ -686,9 +690,13 @@ def agent_prompt(slug: str, rounds: int) -> str:
         "never change settings, compute or the metric direction, and never archive or delete "
         "rounds.\n"
         "- Only edit files inside this project folder.\n"
-        "- Prefer the top-ranked untested idea from prepare-round unless results rule it out, "
-        "but the person's `directions` come first: answer each one with reply_needed once, "
-        f'with `researchforge kaggle steer {slug} --reply <id> "<what you will do>"`.\n'
+        "- The person's queue comes first: prepare-round's `up_next` lists their next-round "
+        "directions, then the ideas they pinned. Follow its head (put its id in the "
+        'proposal\'s "follows"; for a pinned idea also set "hypothesis" to it) or decline it '
+        'with the reason this round cannot ("declines": {"<id>": "<why>"}); execute-round '
+        "refuses a proposal that does neither. After it, prefer the top-ranked untested idea "
+        "unless results rule it out. Answer each direction with reply_needed once, with "
+        f'`researchforge kaggle steer {slug} --reply <id> "<what you will do>"`.\n'
         "End with one line: how many rounds ran and the best score."
     )
 
@@ -701,8 +709,9 @@ def build_command(artifacts_dir: Path, slug: str, cfg: AutoRunConfig) -> list[st
     notes = person_notes(artifacts_dir)
     if notes:
         prompt += (
-            "\n\nThe person's directions, then their recent comments (newest first) — follow "
-            "them; they outrank the idea ranking:\n" + "\n".join(f"- {n}" for n in notes)
+            "\n\nThe person's standing directions and Up next queue (in order), then their "
+            "recent comments (newest first) — follow them; they outrank the idea ranking:\n"
+            + "\n".join(f"- {n}" for n in notes)
         )
     if cfg.driver == "claude":
         cmd = [

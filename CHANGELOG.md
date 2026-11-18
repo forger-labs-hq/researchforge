@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.4.5 — Up next: steer the queue, and auto-run keeps going (2026-11-18)
+
+- **Auto-run keeps experimenting.** Launches now run back to back: when one ends, the next
+  starts within 10 minutes instead of at the next 6-hour monitor cycle (`back_to_back` in Run
+  configs; off goes back to one launch per cycle). The default daily limit is 20 rounds, up
+  from 6, which is what stopped Enveda by mid-afternoon. Open questions and submission offers
+  never stop it; only a pause, a question marked hold, the daily limit, the Kaggle GPU cap or the
+  driver's usage limit do. The project badge for open questions reads "questions for you"
+  instead of "waiting for you", which looked like the loop had stopped.
+- **Up next: one numbered queue, and what the next round does.** The Steer page opens with
+  **Next round R…**: what it will do (your direction, a pinned idea or the engine's top idea)
+  and when it starts, or what is stopping it. Below it one list numbered 1, 2, 3…: your
+  directions (the newest on top), then the ideas you pinned, then the engine's top 10. Every row
+  has ↑/↓ (or drag); moving one of the engine's ideas up pins it, moving the last pinned idea
+  down unpins it. Pin from **📌 Pin** on Hypotheses too (`researchforge kaggle pin`). The same
+  Up next card sits at the top of Runs and Hypotheses. Pinned ideas go before the engine's
+  ranking in every loop.
+- **Hypotheses: the filters act on what you see first.** The idea list now comes before the
+  public-notebook table, which starts folded; it used to fill the screen above the list, so a
+  filter seemed to do nothing.
+- **The top of Up next is followed, not just read.** A round's proposal names the item it
+  follows (`"follows"`) or says why it cannot (`"declines"`); `execute-round` and
+  `run-parallel` refuse a proposal that does neither, and the API-key loop is told once, then
+  refused. A declined item stays at the top with the reason shown under it. The API-key loop
+  now sees your directions at all; it did not before.
+- **A next-round direction stays until a round follows it.** It used to close after the next
+  round read it, whatever that round did. It can now ask for several rounds
+  (`kaggle steer --rounds N`, or "for the next 3 rounds" on the page), and once done it stays
+  on the Steer page for a day with the rounds that followed it and the agent's reply, instead
+  of disappearing behind "Show applied".
+- **🧭 What your steering led to is marked.** Rounds that followed one of your directions or
+  pinned ideas get a 🧭 badge and an amber edge on Runs, an amber ring on the DAG, and a
+  **Steered by** line in the round's details, with the direction it followed (or the reason it
+  declined). Runs has a **Steered by you** filter, and Hypotheses a **🧭 Yours** filter for
+  your pinned ideas and the ideas steered rounds tested. Each round's record is kept in
+  `steered_rounds.json`.
+- **Submissions left today counts every submission.** Kaggle's reply does not always include
+  how many remain; the count used to come from an earlier reply and miss the later ones (it
+  showed 3 of 5 left with 1 left). It now subtracts the submissions made after that reply,
+  and never shows more than the daily limit less today's submissions.
+- **A refused submission is recorded and names its round**, in `submissions_refused.jsonl`
+  with Kaggle's full reply, so a bare 400 can be traced afterwards.
+
 ## 0.4.4 — Only notebooks that wrote a submission are offered (2026-11-18)
 
 - **A notebook round is offered for submission only when it wrote a submission file.** Any

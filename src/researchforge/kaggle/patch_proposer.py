@@ -42,8 +42,15 @@ class PatchProposal:
     branch_tag: str = ""  # DAG: named branch (e.g. "ensemble", "features")
     # The exact pool idea this tests ("" if none) — marks that entry tested
     hypothesis: str = ""
+    # Up next items (the person's queue) this round follows, and the ones it declines, why
+    follows: list[str] = field(default_factory=list)
+    declines: dict[str, str] = field(default_factory=dict)
     # When not empty, the loop should pause and ask the user these questions
     needs_user_input: list[Any] = field(default_factory=list)
+
+    def as_record(self) -> dict[str, Any]:
+        """What the queue checks read (the same keys as a chat proposal.json)."""
+        return {"hypothesis": self.hypothesis, "follows": self.follows, "declines": self.declines}
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +88,8 @@ Return ONLY valid JSON (no prose, no markdown fences):
   "parent_round_num": null,
   "branch_tag": "",
   "hypothesis": "<the exact idea text from the HYPOTHESIS POOL this tests, or empty string>",
+  "follows": ["<ids from UP NEXT this round follows>"],
+  "declines": {"<UP NEXT id this round cannot follow>": "<why>"},
   "needs_user_input": []
 }
 """
@@ -133,10 +142,19 @@ class PatchProposer:
             )
 
         from researchforge.ai.usage import purpose
+        from researchforge.kaggle.steering import check_proposal
 
         context = self._build_context(round_num)
         with purpose(f"proposal_round_{round_num}"):
-            return self._call_ai(context, round_num)
+            proposal = self._call_ai(context, round_num)
+            ignored = check_proposal(self.setup.artifacts_dir, proposal.as_record())
+            if ignored:  # once more, told what it missed
+                context += f"\n=== YOUR LAST PROPOSAL WAS REFUSED ===\nIt was refused: {ignored}.\n"
+                proposal = self._call_ai(context, round_num)
+                ignored = check_proposal(self.setup.artifacts_dir, proposal.as_record())
+        if ignored:
+            raise RuntimeError(f"Proposal refused: {ignored}")
+        return proposal
 
     def record_round_result(self, round: Any) -> None:
         """Inform the proposer of what happened so it can learn."""
@@ -234,11 +252,21 @@ class PatchProposer:
         return (
             f"=== COMPETITION ===\n{meta_section}\n"
             f"=== BASELINE ===\n{baseline_section}\n"
+            f"=== UP NEXT (the person's queue) ===\n{self._up_next_section()}\n"
             f"=== HYPOTHESIS POOL (untested, ranked) ===\n{pool_section}\n"
             f"=== IDEAS FROM SOURCES ===\n{ideas_section}\n"
             f"=== USER CONTEXT ===\n{answers_section}\n"
             f"=== EXPERIMENT HISTORY (Round {round_num}) ===\n{rounds_section}"
         )
+
+    def _up_next_section(self) -> str:
+        """The person's standing directions and queue, with the rule for its head."""
+        from researchforge.kaggle.steering import FOLLOW_RULE, prompt_lines
+
+        lines = prompt_lines(self.setup.artifacts_dir)
+        if not lines:
+            return "Nothing queued: follow the hypothesis pool.\n"
+        return "\n".join(f"  {line}" for line in lines) + f"\n  {FOLLOW_RULE}\n"
 
     def _pool_section(self, limit: int = 10) -> str:
         """The live pool (watcher, arXiv, resynthesize, user) in the shared order."""
@@ -304,5 +332,11 @@ class PatchProposer:
             parent_round_num=data.get("parent_round_num"),
             branch_tag=data.get("branch_tag", ""),
             hypothesis=str(data.get("hypothesis") or ""),
+            follows=[str(x) for x in data.get("follows") or [] if x],
+            declines={
+                str(k): str(v) for k, v in (data.get("declines") or {}).items() if str(v).strip()
+            }
+            if isinstance(data.get("declines"), dict)
+            else {},
             needs_user_input=needs_input,
         )

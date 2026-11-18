@@ -266,7 +266,7 @@ const STATUS = {
   watching: "b-cyan", recent: "b-blue", idle: "b-gray", worktree: "b-purple", backup: "b-purple", waiting: "b-amber", paused: "b-amber", stalled: "b-red",
   not_installed: "b-gray", installed_not_loaded: "b-amber", failing: "b-red", pending: "b-gray", complete_sub: "b-green",
 };
-const LABEL = { waiting: "waiting for you", complete_sub: "complete", skipped: "waiting", never: "never run", not_installed: "not installed", installed_not_loaded: "not loaded", no_improvement: "no change" };
+const LABEL = { waiting: "questions for you", complete_sub: "complete", skipped: "waiting", never: "never run", not_installed: "not installed", installed_not_loaded: "not loaded", no_improvement: "no change" };
 const badge = (s, extra) => `<span class="badge ${STATUS[s] || "b-gray"}${s === "running" ? " pulse" : ""}"${extra ? ` title="${esc(extra)}"` : ""}>${esc(LABEL[s] || s || "—")}</span>`;
 function match(...parts) {
   const q = S.route.q.trim().toLowerCase(); if (!q) return true;
@@ -551,40 +551,139 @@ function wizardForm(art, d) {
 }
 
 // ── Steer ───────────────────────────────────────────────────────────────────
-// Directions for the proposer, as a thread. "Next round" ones are read by the next
-// prepare-round and closed by the round after; standing ones stay until removed.
+// The Up next queue: your next-round directions (newest first unless you reorder them),
+// then the ideas you pinned, then the engine's own ranking. The head of the queue must
+// be followed by the next round, or declined with a reason; standing directions apply
+// to every round. Reorder with ↑/↓ or by dragging a row.
 function dirState(d) {
   if (d.status === "removed") return '<span class="badge b-gray">removed</span>';
   if (d.kind === "standing") return '<span class="badge b-purple">standing</span>';
-  if (d.status === "applied") return `<span class="badge b-green">applied in R${d.read_by_round}</span>`;
-  if (d.status === "read") return `<span class="badge b-blue">read by R${d.read_by_round}</span>`;
-  return '<span class="badge b-amber">waiting for the next round</span>';
+  const by = (d.followed_by || []).map(r => "R" + r).join(", ");
+  if (d.status === "applied") return `<span class="badge b-green">followed by ${by || "R" + d.read_by_round}</span>`;
+  const left = Math.max(1, (d.rounds_wanted || 1) - (d.followed_by || []).length);
+  const more = left > 1 ? ` · ${left} rounds left` : "";
+  if (by) return `<span class="badge b-blue">followed by ${by}${more}</span>`;
+  if (d.status === "read") return `<span class="badge b-blue">read by R${d.read_by_round} · not followed yet${more}</span>`;
+  return `<span class="badge b-amber">waiting for the next round${more}</span>`;
 }
 function vSteer() {
   const ps = projects().filter(p => p.overnight && p.overnight.has_setup && match(p.name, p.overnight.steering));
   if (!ps.length) return `<div class="empty">No set-up competition here. Start one under <a href="${hashOf({ view: "new" })}">New competition</a>.</div>`;
-  return `<div class="sub mb">Steer the research the way you would in a chat. A direction reaches whoever proposes the next round — the chat agent through <code>prepare-round</code>, an auto-run launch in its prompt — ahead of the idea ranking, and it answers here. Submissions and repo plans still need their own yes.</div>` + ps.map(steerCard).join("");
+  return `<div class="sub mb">Up next is the order the loop works in: <b>#1 is what the next round does</b>. Your directions always come first, then ideas you pinned, then the engine's own ranking. Move anything with ↑/↓ or drag — moving one of the engine's ideas up pins it. The round must follow #1 or say why it can't, and that reason shows here. Open questions never stop the loop.</div>` + ps.map(steerCard).join("");
+}
+// The next round: its number, what it will follow, and when it starts (or what stops it).
+function nextRound(p) {
+  const o = p.overnight, ar = o.auto_run || {}, ctl = o.control || {}, cfg = ar.config || {};
+  const n = Math.max(0, ...p.experiments.filter(e => e.source === "overnight").map(e => e.num || 0)) + 1;
+  const q = (o.up_next || [])[0], eng = (o.engine_next || [])[0];
+  const what = q ? `${q.kind === "direction" ? "🧭 your direction" : "📌 your pinned idea"}: <b>${esc(q.text)}</b>` : eng ? `the engine's top idea: <b>${esc(eng.text)}</b>` : "nothing — the idea pool is empty";
+  let start;
+  if (ctl.paused) start = `<span style="color:var(--amber)">paused</span> — press Resume`;
+  else if (ar.running) start = `a launch is running now (since ${when(ar.running.started_at)}); R${n} is its next round`;
+  else if (!ar.enabled) start = `auto-run is off — it runs when you start a round from Claude or Cursor, or turn auto-run on in <a href="${hashOf({ view: "automation", p: p.id })}">Automation</a>`;
+  else if ((ar.gates || []).length) start = `<span style="color:var(--amber)">waiting: ${esc(ar.gates.join("; "))}</span> — change the limits in <a href="${hashOf({ view: "configs", p: p.id })}">Run configs</a>`;
+  else if (ar.readiness && !ar.readiness.ready) start = `<span style="color:var(--amber)">waiting for the ${esc(DRIVER_NAMES[cfg.driver] || cfg.driver)} driver: ${esc(ar.readiness.detail)}</span>`;
+  else start = cfg.back_to_back !== false ? "starts within 10 minutes" : "starts at the next monitor cycle";
+  return `<div style="padding:10px 12px;border:1px solid ${STEER_COLOR};border-radius:8px;background:#42200633;margin-bottom:10px"><div><b>Next round R${n}</b> will do ${what}</div><div class="sub">When: ${start}</div></div>`;
+}
+// One numbered list: directions, then pinned ideas, then the engine's ideas.
+function queueRows(p) {
+  const o = p.overnight;
+  const dirs = (o.steering || []).filter(d => d.status !== "removed" && !(d.kind === "next" && d.status === "applied"));
+  const pins = (o.up_next || []).filter(x => x.kind === "pinned_idea");
+  const eng = o.engine_next || [];
+  return [
+    ...dirs.map((d, i) => ({ group: "steer", i, n: dirs.length, id: d.id, text: d.text, d })),
+    ...pins.map((x, i) => ({ group: "pins", i, n: pins.length, id: x.id, text: x.text })),
+    ...eng.map((x, i) => ({ group: "engine", i, n: eng.length, id: x.pin_id, text: x.text, why: x.why })),
+  ];
+}
+function queueArrows(r, pid) {
+  const btn = (delta, label, title, on) => `<button title="${title}" data-act="q-move" data-q="${r.group}" data-id="${pid}" data-i="${r.i}" data-delta="${delta}" data-qid="${esc(r.id)}" ${on ? "" : "disabled"}>${label}</button>`;
+  if (r.group === "steer") return btn(-1, "↑", "Move up", r.i > 0) + btn(1, "↓", "Move down", r.i < r.n - 1);
+  if (r.group === "pins") return btn(-1, "↑", "Move up", r.i > 0) + btn(1, "↓", r.i === r.n - 1 ? "Unpin: back to the engine's ranking" : "Move down", true);
+  return btn(-1, "↑", "Pin it: it moves ahead of the engine's other ideas", true) + btn(1, "↓", "The engine orders its own ideas", false);
+}
+function queueList(p, full) {
+  const rows = queueRows(p), id = p.id;
+  if (!rows.length) return `<div class="sub">The queue is empty: write a direction or add an idea.</div>`;
+  const shown = full ? rows : rows.slice(0, 3);
+  const tag = r => r.group === "steer" ? (r.d.kind === "standing" ? '<span class="badge b-purple">standing · every round</span>' : `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR}">🧭 your direction</span>`)
+    : r.group === "pins" ? '<span class="badge b-purple">📌 pinned</span>' : '<span class="badge b-gray">engine</span>';
+  let place = 0;
+  return shown.map(r => {
+    const standing = r.group === "steer" && r.d.kind === "standing";
+    const num = standing ? "∞" : String(++place);
+    const head = !standing && place === 1;
+    const extra = r.group === "steer" ? `<div class="flex" style="margin-top:2px">${dirState(r.d)}<span class="sub">you · ${when(r.d.at)}</span>${full ? `<button class="right" data-act="steer-remove" data-id="${id}" data-d="${esc(r.d.id)}">Remove</button>` : ""}</div>${full ? dirThread(r.d) : ""}`
+      : r.group === "pins" && full ? `<div class="flex" style="margin-top:2px"><button class="right" data-act="pin" data-op="unpin" data-id="${id}" data-pin="${esc(r.id)}">Unpin</button></div>`
+      : r.why ? `<div class="dim">${esc(r.why)}</div>` : "";
+    return `<div ${full && r.group !== "engine" ? `draggable="true" data-dragq="${r.group}" data-pid="${id}" data-qid="${esc(r.id)}" data-i="${r.i}"` : ""} style="display:flex;gap:10px;align-items:flex-start;margin:6px 0;padding:8px 10px;border:1px solid ${head ? STEER_COLOR : "var(--border)"};border-radius:8px;background:${r.group === "engine" ? "transparent" : "var(--panel2)"}">
+      <div class="mono" style="min-width:28px;font-size:16px;font-weight:700;color:${head ? STEER_COLOR : "var(--dim)"}" title="${standing ? "Standing: applies to every round" : head ? "The next round does this" : "Its place in the queue"}">${num}</div>
+      <div style="flex:1;min-width:0"><div class="flex">${tag(r)}${head ? `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR}">next round</span>` : ""}</div><div style="margin:4px 0;white-space:pre-wrap">${esc(r.text)}</div>${extra}</div>
+      ${full ? `<div class="flex" style="gap:2px;flex-shrink:0">${queueArrows(r, id)}</div>` : ""}</div>`;
+  }).join("") + (!full && rows.length > 3 ? `<a class="sub" href="${hashOf({ view: "steer", p: p.id })}">${rows.length - 3} more — reorder on Steer →</a>` : "");
+}
+// Compact queue for Runs and Hypotheses: the next round and the top of the list.
+function queueCard(p) {
+  if (!p.overnight || !p.overnight.has_setup) return "";
+  return `<details class="card mb" ${det("q:" + p.id, true)}><summary><span class="title">Up next · ${esc(p.name)}</span><span class="sub">what the loop runs next</span><a class="right sub" href="${hashOf({ view: "steer", p: p.id })}">Steer / reorder →</a></summary><div class="bd">${nextRound(p)}${queueList(p, false)}</div></details>`;
+}
+function qMove(ids, i, delta) { const out = ids.slice(), j = i + delta; if (j < 0 || j >= out.length) return null; [out[i], out[j]] = [out[j], out[i]]; return out; }
+function dirThread(d) {
+  return d.replies.map(r => `<div style="margin:4px 0 0 16px;padding-left:8px;border-left:2px solid ${r.by === "person" ? "var(--accent)" : "var(--green)"}"><span class="sub">${r.by === "person" ? "you" : "proposer"} · ${when(r.at)}</span><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join("")
+    + (d.declined || []).map(x => `<div style="margin:4px 0 0 16px;padding-left:8px;border-left:2px solid var(--amber)"><span class="sub">R${esc(x.round)} declined it · ${when(x.at)}</span><div style="white-space:pre-wrap">${esc(x.reason)}</div></div>`).join("");
 }
 function steerCard(p) {
   const o = p.overnight, id = p.id, ctl = o.control || {}, b = k => S.busy.has(k + ":" + id) ? "disabled" : "";
   const items = o.steering || [], showOld = S.open.get("steerold:" + id);
-  const shown = items.filter(d => showOld || d.status !== "removed" && !(d.kind === "next" && d.status === "applied"));
-  let h = `<div class="card mb"><div class="hd">${badge(ctl.paused ? "paused" : p.state)}<span class="title">${esc(p.name)}</span><span class="sub">${o.round_context && o.round_context.round_num ? `next round R${o.round_context.round_num}` : ""}</span>
+  const live = items.filter(d => d.status !== "removed" && !(d.kind === "next" && d.status === "applied"));
+  const dayAgo = Date.now() - 864e5;
+  const recent = items.filter(d => d.kind === "next" && d.status === "applied" && new Date(d.applied_at || d.at).getTime() > dayAgo);
+  const old = items.filter(d => !live.includes(d) && !recent.includes(d));
+  let h = `<div class="card mb"><div class="hd">${badge(ctl.paused ? "paused" : p.state)}<span class="title">${esc(p.name)}</span>
     <span class="right flex">${ctl.paused ? `<button data-act="loop" data-op="resume" data-id="${id}" ${b("loop")}>Resume</button>` : `<button data-act="loop" data-op="pause" data-id="${id}" ${b("loop")}>Pause</button>`}
     <button data-act="loop" data-op="resynthesize" data-id="${id}" ${b("loop")} title="Rebuild the idea pool from the results so far">Re-synthesize now</button></span></div><div class="bd">`;
-  if (ctl.paused) h += issues([{ level: "warn", message: `Paused${ctl.pause_reason ? ": " + ctl.pause_reason : ""}`, hint: "No new rounds start until you resume. Sensors keep running." }]);
-  h += shown.length ? shown.map(d => `<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)">
-      <div class="flex">${dirState(d)}<span class="sub">you · ${when(d.at)}${d.via !== "dashboard" ? ` · from ${esc(d.via)}` : ""}</span>${d.status !== "removed" && d.status !== "applied" ? `<button class="right" data-act="steer-remove" data-id="${id}" data-d="${esc(d.id)}" title="Stop telling the proposer">Remove</button>` : ""}</div>
-      <div style="margin:4px 0;white-space:pre-wrap">${esc(d.text)}</div>
-      ${d.replies.map(r => `<div style="margin:4px 0 0 16px;padding-left:8px;border-left:2px solid ${r.by === "person" ? "var(--accent)" : "var(--green)"}"><span class="sub">${r.by === "person" ? "you" : "proposer"} · ${when(r.at)}</span><div style="white-space:pre-wrap">${esc(r.text)}</div></div>`).join("")}
-    </div>`).join("") : `<div class="sub">No directions yet.</div>`;
-  if (items.length > shown.length || showOld) h += `<a class="sub" href="#" data-act="steer-old" data-id="${id}">${showOld ? "Hide" : "Show"} applied and removed (${items.length - items.filter(d => d.status !== "removed" && !(d.kind === "next" && d.status === "applied")).length})</a>`;
-  h += `<div class="mt"><textarea rows="2" style="width:100%" placeholder="e.g. Stop tuning LightGBM — try a transformer on the raw sequences next" data-ans="steer:${id}">${esc(S.ans["steer:" + id] || "")}</textarea></div>
-    <div class="flex"><select id="steer-kind-${id}" aria-label="How long it applies"><option value="next">for the next round</option><option value="standing">for every round until removed</option></select>
-    <button class="primary" data-act="steer-add" data-id="${id}" ${b("steer")}>Send direction</button>
-    <span class="sub" style="margin-left:12px">or add one idea to the pool:</span><input type="text" style="flex:1;min-width:180px" placeholder="an idea in one sentence" data-ans="idea:${id}" value="${esc(S.ans["idea:" + id] || "")}"><button data-act="loop" data-op="add-idea" data-id="${id}" ${b("loop")}>Add idea</button></div>`;
+  h += nextRound(p);
+  h += `<div><textarea rows="2" style="width:100%" placeholder="Tell the loop what to do next, e.g. Try RL-based reranking next" data-ans="steer:${id}">${esc(S.ans["steer:" + id] || "")}</textarea></div>
+    <div class="flex mb"><select id="steer-kind-${id}" aria-label="How long it applies"><option value="next:1">for the next round</option><option value="next:3">for the next 3 rounds</option><option value="next:5">for the next 5 rounds</option><option value="standing:1">for every round until removed</option></select>
+    <button class="primary" data-act="steer-add" data-id="${id}" ${b("steer")}>Send direction — it goes to #1</button>
+    <span class="sub" style="margin-left:12px">or add an idea:</span><input type="text" style="flex:1;min-width:160px" placeholder="an idea in one sentence" data-ans="idea:${id}" value="${esc(S.ans["idea:" + id] || "")}"><button data-act="loop" data-op="add-idea" data-id="${id}" ${b("loop")}>Add idea</button></div>`;
+  h += `<div class="sec">Up next <span class="sub" style="text-transform:none;letter-spacing:0">— ${live.length} direction(s), ${(o.up_next || []).filter(x => x.kind === "pinned_idea").length} pinned, then the engine's top ${(o.engine_next || []).length}</span></div>`;
+  h += queueList(p, true);
+  if (recent.length) h += `<div class="sec">Done in the last 24 hours</div>` + recent.map(d => `<div style="margin:6px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px"><div class="flex">${dirState(d)}<span class="sub">you · ${when(d.at)}</span></div><div style="margin:4px 0;white-space:pre-wrap">${esc(d.text)}</div>${dirThread(d)}</div>`).join("");
+  if (old.length) {
+    h += `<a class="sub" href="#" data-act="steer-old" data-id="${id}">${showOld ? "Hide" : "Show"} older and removed (${old.length})</a>`;
+    if (showOld) h += old.map(d => `<div style="margin:6px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;opacity:.75"><div class="flex">${dirState(d)}<span class="sub">you · ${when(d.at)}</span></div><div style="margin:4px 0;white-space:pre-wrap">${esc(d.text)}</div>${dirThread(d)}</div>`).join("");
+  }
   return h + "</div></div>";
 }
+// Reorder a queue group: steer = direction ids (standing ones keep their place among them),
+// pins = pinned idea ids.
+function qOrder(group, p) {
+  const o = p.overnight;
+  return group === "steer"
+    ? (o.steering || []).filter(d => d.status !== "removed" && !(d.kind === "next" && d.status === "applied")).map(d => d.id)
+    : (o.up_next || []).filter(x => x.kind === "pinned_idea").map(x => x.id);
+}
+function qSave(group, p, ids) {
+  const body = group === "steer" ? { project: p.id, op: "order", ids } : { project: p.id, op: "pins", ids };
+  act("steer:" + p.id, () => api("/api/steer", body), "Up next reordered");
+}
+let qDrag = null;
+document.addEventListener("dragstart", e => { const r = e.target.closest && e.target.closest("[data-dragq]"); if (!r) return; qDrag = { q: r.dataset.dragq, pid: r.dataset.pid, i: +r.dataset.i }; e.dataTransfer.effectAllowed = "move"; });
+document.addEventListener("dragover", e => { const r = e.target.closest && e.target.closest("[data-dragq]"); if (r && qDrag && r.dataset.dragq === qDrag.q && r.dataset.pid === qDrag.pid) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  const r = e.target.closest && e.target.closest("[data-dragq]");
+  if (!r || !qDrag || r.dataset.dragq !== qDrag.q || r.dataset.pid !== qDrag.pid) return;
+  e.preventDefault();
+  const p = projects().find(x => x.id === qDrag.pid), to = +r.dataset.i, from = qDrag.i;
+  qDrag = null;
+  if (!p || to === from) return;
+  const ids = qOrder(r.dataset.dragq, p), [moved] = ids.splice(from, 1);
+  ids.splice(to, 0, moved);
+  qSave(r.dataset.dragq, p, ids);
+});
 
 // ── Run configs ─────────────────────────────────────────────────────────────
 // Everything setup asked and everything decided since, per project, editable in place.
@@ -669,6 +768,7 @@ function configCard(p) {
   h += row("Rounds per launch", cfgInput(p, "auto_run_rounds_per_launch", c.auto_run.rounds_per_launch, 'type="number" min="1" max="20" style="width:90px"'));
   h += row("Most rounds per day", cfgInput(p, "auto_run_max_rounds_per_day", c.auto_run.max_rounds_per_day, 'type="number" min="1" max="100" style="width:90px"'));
   h += row("Stop a launch after (min)", cfgInput(p, "auto_run_max_minutes", c.auto_run.max_minutes, 'type="number" min="10" max="1440" style="width:90px"'));
+  h += row("Back-to-back launches", cfgSelect(p, "auto_run_back_to_back", String(c.auto_run.back_to_back !== false), [["true", "on — the next launch starts within 10 minutes"], ["false", "off — one launch per monitor cycle"]]), "Open questions never stop it; a pause, a held question or the limits above do.");
   h += sec("The metric");
   h += row("Name", `<span class="mono">${esc(c.metric.name || "—")}</span>`);
   h += row("Better is", cfgSelect(p, "metric_direction", c.metric.direction, [["maximize", "higher (maximize)"], ["minimize", "lower (minimize)"]]), c.metric.source ? `from: ${esc(c.metric.source)}` : "");
@@ -959,11 +1059,11 @@ function autoRunPanel(p) {
     <span class="sub">max per day</span><input type="number" id="ar-day-${p.id}" min="1" max="100" value="${c.max_rounds_per_day}" style="width:58px" aria-label="Max rounds per day">
     <button data-act="ar-save" data-id="${p.id}" ${S.busy.has("ar:" + p.id) ? "disabled" : ""}>Save</button>
     ${ar.running ? `<button data-act="ar-stop" data-id="${p.id}" ${S.busy.has("arstop:" + p.id) ? "disabled" : ""}>Stop launch</button>` : `<button class="primary" data-act="ar-start" data-id="${p.id}" ${S.busy.has("arstart:" + p.id) ? "disabled" : ""} title="Start one launch now, through the same checks">Start now</button>`}</div>`;
-  const next = !ar.enabled ? "turn auto-run on and the next monitor cycle starts a launch" : !r.ready ? `a launch starts once ${DRIVER_NAMES[c.driver]} is ready (see Driver above)` : "the next monitor cycle starts a launch";
+  const next = !ar.enabled ? "turn auto-run on and the next monitor cycle starts a launch" : !r.ready ? `a launch starts once ${DRIVER_NAMES[c.driver]} is ready (see Driver above)` : c.back_to_back !== false ? "the next launch starts within 10 minutes" : "the next monitor cycle starts a launch";
   h += `<div class="sub">${ar.gates.length ? "Waiting: " + esc(ar.gates.join("; ")) : `Checks clear — ${esc(next)}.`} · ${ar.rounds_today} round(s) today</div>`;
   if (ar.running) h += `<div class="sub">Running: ${badge("running")} ${esc(DRIVER_NAMES[ar.running.driver])} since ${when(ar.running.started_at)} · pid ${ar.running.pid}</div>`;
   if (ar.last) h += `<div class="sub">Last launch: ${badge(ar.last.status === "finished" ? "ok" : ar.last.status === "stopped" ? "cancelled" : "error")} ${esc(ar.last.status)} ${when(ar.last.finished_at)} · ${esc(DRIVER_NAMES[ar.last.driver] || ar.last.driver || "")} · ${ar.last.rounds_run || 0} round(s)${ar.last.error && ar.last.status !== "stopped" ? ` · <span style="color:var(--red)">${esc(ar.last.error)}</span>` : ""}</div>`;
-  h += `<div class="dim" style="font-size:11px">Never submits to Kaggle. Stops for pauses and open questions. Log: <code>${esc(shortPath(ar.log))}</code></div>`;
+  h += `<div class="dim" style="font-size:11px">Never submits to Kaggle. ${c.back_to_back !== false ? "Launches run back to back" : "One launch per monitor cycle"}; open questions never stop it, only a pause or a question marked hold. Log: <code>${esc(shortPath(ar.log))}</code></div>`;
   return h;
 }
 function automationCard(p, single) {
@@ -1026,16 +1126,28 @@ function archivedRuns() {
     `<tr><td class="trunc" style="max-width:180px">${esc(p.name)}</td><td class="mono">${esc(e.id)}</td><td class="trunc">${esc(e.title)}</td><td class="mono">${fmtM(e.metric)}</td>
       <td><button data-act="round" data-op="restore" data-id="${p.id}" data-round="${e.num}">Restore</button> <button data-act="round" data-op="delete" data-id="${p.id}" data-round="${e.num}">Delete forever</button></td></tr>`).join("")}</tbody></table></div></details>`;
 }
+// 🧭 marks what your Steer directions and pinned ideas led to (steered_rounds.json).
+const STEER_COLOR = "#f59e0b";
+function steerWhy(list) { return (list || []).map(g => `${g.how === "declined" ? "Declined" : "Followed"} your ${g.kind === "direction" ? "direction" : "pinned idea"}: ${g.text}${g.reason ? " — " + g.reason : ""}`).join("\n"); }
+function steerTag(list) {
+  const followed = (list || []).filter(g => g.how === "followed");
+  if (!followed.length) return "";
+  return `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR};background:#422006" title="${esc(steerWhy(followed))}">🧭 steered</span>`;
+}
+const isSteered = e => (e.steered || []).some(g => g.how === "followed");
 function vRuns() {
   const rows = [];
   projects().forEach(p => p.experiments.forEach(e => rows.push({ p, e })));
   rows.sort((a, b) => (b.e.started_at || "").localeCompare(a.e.started_at || ""));
-  const f = rows.filter(({ p, e }) => match(p.name, e.id, e.title, e.status, e.branch, e.reason));
+  const only = S.chips.runsteer === "steered";
+  const f = rows.filter(({ p, e }) => match(p.name, e.id, e.title, e.status, e.branch, e.reason) && (!only || isSteered(e)));
   if (!rows.length) return emptyFor("experiments");
-  const multi = projects().length > 1;
-  return `<div class="card"><div class="tbl"><table><thead><tr>${multi ? "<th>Project</th>" : ""}<th>Run</th><th>Title</th><th>Status</th><th>Stage</th><th>Metric</th><th>Δ baseline</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
-    ${f.slice(0, 500).map(({ p, e }) => `<tr class="click" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}">${multi ? `<td class="trunc" style="max-width:180px">${esc(p.name)}</td>` : ""}
-      <td class="mono">${esc(e.id)}${p.best && p.best.id === e.id ? " ★" : ""}${e.driver ? `<div class="dim" style="font-size:11px" title="driver that ran this round">${esc(DRIVER_NAMES[e.driver] || e.driver)}${e.auto_run ? " · auto" : ""}</div>` : ""}</td><td class="trunc" title="${esc(e.title)}">${esc(e.title)}${e.reason && e.status !== "improved" ? `<div class="dim trunc">${esc(e.reason)}</div>` : ""}</td>
+  const multi = projects().length > 1, nSteered = rows.filter(({ e }) => isSteered(e)).length;
+  const queues = projects().filter(p => p.overnight && p.overnight.has_setup && p.role === "primary").slice(0, 3).map(queueCard).join("");
+  return queues + `<div class="chips">${[["all", `All runs (${rows.length})`], ["steered", `🧭 Steered by you (${nSteered})`]].map(([k, l]) => `<span class="chip${(S.chips.runsteer || "all") === k ? " on" : ""}" data-act="chip" data-group="runsteer" data-val="${k}">${l}</span>`).join("")}</div>
+    <div class="card"><div class="tbl"><table><thead><tr>${multi ? "<th>Project</th>" : ""}<th>Run</th><th>Title</th><th>Status</th><th>Stage</th><th>Metric</th><th>Δ baseline</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
+    ${f.slice(0, 500).map(({ p, e }) => `<tr class="click" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}"${isSteered(e) ? ` style="box-shadow:inset 3px 0 0 ${STEER_COLOR}"` : ""}>${multi ? `<td class="trunc" style="max-width:180px">${esc(p.name)}</td>` : ""}
+      <td class="mono">${esc(e.id)}${p.best && p.best.id === e.id ? " ★" : ""}${e.driver ? `<div class="dim" style="font-size:11px" title="driver that ran this round">${esc(DRIVER_NAMES[e.driver] || e.driver)}${e.auto_run ? " · auto" : ""}</div>` : ""}</td><td class="trunc" title="${esc(e.title)}">${steerTag(e.steered)} ${esc(e.title)}${e.reason && e.status !== "improved" ? `<div class="dim trunc">${esc(e.reason)}</div>` : ""}</td>
       <td>${badge(e.status)}</td><td class="sub">${esc(e.stage || "—")}</td><td class="mono">${fmtM(e.metric)}</td><td class="mono">${delta(e) || '<span class="dim">—</span>'}</td>
       <td class="sub">${when(e.started_at)}</td><td class="sub">${dur(e.duration_s)}</td>
       <td>${e.source === "overnight" && e.status !== "running" ? `<button data-act="round" data-op="archive" data-id="${p.id}" data-round="${e.num}" title="Hide it everywhere; never a parent or best. Reversible.">Archive</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
@@ -1124,9 +1236,11 @@ function dagSvg(p, exps, source) {
     const [fill, stroke, mc] = nodeColors(e, isBest);
     const t = e.title.length > 30 ? e.title.slice(0, 29) + "…" : e.title;
     const on = sel === e.id;
-    nodes += `<g class="node" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}"><title>${esc(e.id + ": " + e.title + " — " + e.status)}</title>
+    const steer = isSteered(e);
+    nodes += `<g class="node" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}"><title>${esc(e.id + ": " + e.title + " — " + e.status + (steer ? "\n" + steerWhy(e.steered) : ""))}</title>
+      ${steer ? `<rect x="${x - 4}" y="${y - 4}" width="${NODE.w + 8}" height="${NODE.h + 8}" rx="11" fill="none" stroke="${STEER_COLOR}" stroke-width="2"/>` : ""}
       <rect x="${x}" y="${y}" width="${NODE.w}" height="${NODE.h}" rx="8" fill="${fill}" stroke="${on ? "#f8fafc" : stroke}" stroke-width="${on ? 2.5 : 1.5}"${e.status === "stale" ? ' stroke-dasharray="4 3"' : e.imported ? ' stroke-dasharray="2 3"' : ""}${e.status === "running" ? ' class="pulse"' : ""}/>
-      <text x="${x + 10}" y="${y + 17}" fill="#fff" font-size="12" font-weight="700">${esc(e.id)}${isBest ? " ★" : ""}${e.is_merge ? " ⑂" : ""}</text>
+      <text x="${x + 10}" y="${y + 17}" fill="#fff" font-size="12" font-weight="700">${esc(e.id)}${isBest ? " ★" : ""}${e.is_merge ? " ⑂" : ""}${steer ? " 🧭" : ""}</text>
       <text x="${x + NODE.w - 10}" y="${y + 17}" fill="${mc}" font-size="12" font-weight="600" text-anchor="end">${fmtM(e.metric)}</text>
       <text x="${x + 10}" y="${y + 34}" fill="#cbd5e1" font-size="11">${esc(t)}</text>
       <text x="${x + 10}" y="${y + 50}" fill="#64748b" font-size="10">${esc(e.status)}${e.stage ? " · " + esc(e.stage) : ""}${e.branch ? " · " + esc(e.branch.slice(0, 14)) : ""}</text></g>`;
@@ -1143,6 +1257,7 @@ function nodeDetail(p, e) {
     <div>Baseline</div><div class="mono">${fmtM(e.baseline)}</div>
     <div>Parents</div><div>${e.parents.length ? e.parents.map(link).join(", ") : "baseline"}</div>
     <div>Children</div><div>${children.length ? children.map(c => link(c.id)).join(", ") : "—"}</div>
+    ${(e.steered || []).length ? `<div>Steered by</div><div>${e.steered.map(g => `${g.how === "declined" ? "declined" : "🧭 followed"} your ${g.kind === "direction" ? "direction" : "pinned idea"}: ${esc(g.text)}${g.reason ? ` <span class="dim">— ${esc(g.reason)}</span>` : ""}`).join("<br>")}</div>` : ""}
     <div>Hypothesis</div><div>${hyps.length ? hyps.map(h => `<a href="${hashOf({ view: "hypotheses", p: p.id, q: h.title.slice(0, 40) })}">${esc(h.title)}</a>`).join("<br>") : '<span class="dim">no linked hypothesis recorded</span>'}</div>
     <div>Branch / plan</div><div class="mono">${esc(e.branch || "—")}</div>
     ${e.credit ? `<div>Credit</div><div>${esc(e.credit)}</div>` : ""}
@@ -1170,7 +1285,7 @@ function vDag() {
       ? `start with <code>researchforge kaggle prepare-round ${esc(p.slug)}</code>`
       : p.repo && p.repo.next_action ? `next: <code>${esc(p.repo.next_action.split("#")[0].trim())}</code>` : "no experiments recorded"}</span></div>`).join("")}</div></div>` : "";
   if (!ps.length) return (noneCard || emptyFor("experiments to graph"));
-  let h = `<div class="chips"><span class="sub">Legend:</span>${[["#3b82f6", "best ★"], ["#22c55e", "improved"], ["#06b6d4", "has metric"], ["#f59e0b", "running"], ["#ef4444", "failed"], ["#3b82f6", "planned (outline)"], ["#475569", "no result / stale"], ["#a78bfa", "merge candidate (dashed)"], ["#64748b", "imported from the repo engine (dotted)"]].map(([c, l]) =>
+  let h = `<div class="chips"><span class="sub">Legend:</span>${[["#3b82f6", "best ★"], ["#22c55e", "improved"], ["#06b6d4", "has metric"], ["#f59e0b", "running"], ["#ef4444", "failed"], ["#3b82f6", "planned (outline)"], ["#475569", "no result / stale"], ["#a78bfa", "merge candidate (dashed)"], ["#64748b", "imported from the repo engine (dotted)"], [STEER_COLOR, "🧭 steered by you (amber ring)"]].map(([c, l]) =>
     `<span class="flex sub"><span class="dot" style="background:${c}"></span>${l}</span>`).join("")}</div>`;
   const single = ps.length === 1;
   ps.filter(p => match(p.name, p.experiments.map(e => e.id + " " + e.title))).forEach(p => {
@@ -1222,7 +1337,7 @@ function vHyp() {
   const all = ps.flatMap(p => p.hypotheses);
   if (!all.length) return emptyFor("hypotheses");
   const f = S.chips.hyp || "open";
-  const filters = [["open", "Untested", h => !h.tested && !["rejected", "draft"].includes(h.status)], ["tested", "Tested", h => h.tested], ["draft", "Drafts", h => h.status === "draft"], ["rejected", "Rejected", h => h.status === "rejected"], ["all", "All", () => true]];
+  const filters = [["open", "Untested", h => !h.tested && !["rejected", "draft"].includes(h.status)], ["tested", "Tested", h => h.tested], ["draft", "Drafts", h => h.status === "draft"], ["rejected", "Rejected", h => h.status === "rejected"], ["steered", "🧭 Yours", h => h.pin || (h.steered || []).length], ["all", "All", () => true]];
   const pred = (filters.find(x => x[0] === f) || filters[0])[2];
   const sortBy = S.chips.hypsort || "claim";
   const claimOf = x => (x.kernel && typeof x.kernel.claimed_score === "number") ? (x.kernel.vs_our_best ?? x.kernel.claimed_score) : -Infinity;
@@ -1231,24 +1346,26 @@ function vHyp() {
   ps.forEach(p => {
     const list = p.hypotheses.filter(pred).filter(x => match(p.name, x.title, x.detail, x.origin, x.status));
     if (sortBy === "claim") list.sort((a, b) => claimOf(b) - claimOf(a));
+    list.sort((a, b) => (a.pin ?? Infinity) - (b.pin ?? Infinity));  // your pinned ideas first, in your order
     if (!p.hypotheses.length) {
       if (p.role === "primary" && match(p.name)) h += `<div class="card mb"><div class="hd"><span class="title">${esc(p.name)}</span><span class="sub">no hypotheses yet</span><span class="right">${kindBadges(p)}</span></div><div class="bd sub">${p.overnight
         ? `Ideas arrive from the kernel watcher and arXiv sensors (<code>researchforge kaggle monitor ${esc(p.slug)}</code>), from <code>researchforge kaggle resynthesize ${esc(p.slug)}</code>, or directly via <code>researchforge kaggle propose-hypothesis ${esc(p.slug)} --idea "…"</code>.`
         : `Generate them with <code>researchforge hypotheses generate</code> (or <code>/researchforge-hypotheses</code> in Claude Code).`}</div></div>`;
       return;
     }
-    h += kernelBoard(p);
+    if (p.role === "primary") h += queueCard(p);
     const untested = p.hypotheses.filter(x => !x.tested && x.status !== "rejected").length;
     h += `<details class="card mb" ${det("hyp:" + p.id, list.length > 0 && (ps.length === 1 || p.state !== "idle"))}><summary><span class="title">${esc(p.name)}</span><span class="sub">${p.hypotheses.length} total · ${untested} untested · ${list.length} shown</span><span class="right">${kindBadges(p)}</span></summary><div>`;
     h += list.slice(0, 300).map(x => `<div class="row" style="align-items:flex-start"><span style="font-size:16px">${ORIGIN_ICON(x.origin)}</span>
-      <div style="flex:1;min-width:0"><div class="flex">${esc(x.title)} ${badge(x.tested ? "tested" : x.status)} ${x.confidence ? `<span class="badge ${CONF[x.confidence] || "b-gray"}" title="metric confidence">${esc(x.confidence)}</span>` : ""} ${x.outcome ? badge(x.outcome === "improved" ? "improved" : x.outcome === "failed" ? "failed" : "complete", x.outcome) : ""}</div>
+      <div style="flex:1;min-width:0"><div class="flex">${x.pin ? `<span class="badge b-purple" title="Pinned: tried in this order, after your directions">📌 ${x.pin}</span>` : ""}${steerTag(x.steered)}${esc(x.title)} ${badge(x.tested ? "tested" : x.status)} ${x.confidence ? `<span class="badge ${CONF[x.confidence] || "b-gray"}" title="metric confidence">${esc(x.confidence)}</span>` : ""} ${x.outcome ? badge(x.outcome === "improved" ? "improved" : x.outcome === "failed" ? "failed" : "complete", x.outcome) : ""}</div>
       ${x.detail ? `<div class="dim" style="border-left:2px solid var(--border);padding-left:8px;margin-top:3px">${esc(x.detail.slice(0, 400))}</div>` : ""}
       ${claimLine(p, x)}
       ${x.tested_by.length ? `<div class="sub">Tested by: ${x.tested_by.map(id => `<a class="mono" href="${hashOf({ view: "dag", p: p.id, n: id })}">${esc(id)}</a>`).join(", ")}</div>` : ""}
       ${x.refs && x.refs.length ? `<div class="dim mono trunc">${x.refs.map(esc).join(" · ")}</div>` : ""}</div>
-      <div style="text-align:right;flex-shrink:0" class="sub"><div>${esc(x.origin)}</div><div>${when(x.created_at)}</div>${x.priority != null ? `<div>p=${esc(x.priority)}</div>` : ""}<div class="mono dim">${esc(x.id)}</div></div></div>`).join("") ||
+      <div style="text-align:right;flex-shrink:0" class="sub">${x.pin_id && !x.tested && x.status === "untested" ? `<div><button data-act="pin" data-op="${x.pin ? "unpin" : "pin"}" data-id="${p.id}" data-pin="${esc(x.pin_id)}" title="${x.pin ? "Take it out of your Up next queue" : "Try this before the engine's ranking (Steer → Up next)"}">${x.pin ? "Unpin" : "📌 Pin"}</button></div>` : ""}<div>${esc(x.origin)}</div><div>${when(x.created_at)}</div>${x.priority != null ? `<div>p=${esc(x.priority)}</div>` : ""}<div class="mono dim">${esc(x.id)}</div></div></div>`).join("") ||
       `<div class="empty">No hypotheses match this filter.</div>`;
     h += `</div></details>`;
+    h += kernelBoard(p);  // the public-notebook table, after the ideas the filters act on
   });
   return h;
 }
@@ -1261,7 +1378,7 @@ function kernelBoard(p) {
   const ours = typeof b.our_best_lb === "number" ? b.our_best_lb : null;
   const ahead = b.rows.filter(r => typeof r.gap === "number" && r.gap > 0).length;
   const tried = r => (r.tried || []).map(t => `<a class="mono" href="${hashOf({ view: "dag", p: p.id, n: "R" + t.round })}" title="${esc(t.note || "")}">R${t.round}</a>${t.lb != null ? ` LB ${fmtM(t.lb)}` : t.local != null ? ` local ${fmtM(t.local)}` : t.note ? " ✗" : ""}`).join(", ");
-  let h = `<details class="card mb" ${det("kb:" + p.id, ahead > 0)}><summary><span class="title">${esc(p.name)} · public notebooks</span><span class="sub">ranked by claimed LB · our best LB ${ours != null ? fmtM(ours) : "—"} · ${ahead} claim more · checked ${when(b.fetched_at)}</span></summary>
+  let h = `<details class="card mb" ${det("kb:" + p.id, false)}><summary><span class="title">${esc(p.name)} · public notebooks</span><span class="sub">ranked by claimed LB · our best LB ${ours != null ? fmtM(ours) : "—"} · ${ahead} claim more · checked ${when(b.fetched_at)}</span></summary>
     <div class="sub" style="padding:6px 12px">Claims are the authors' own words (title or notebook text), not measurements. <b>Kaggle #</b> is the notebook's place in Kaggle's best-score order. Re-run notebooks are re-read every hour.</div>
     <div style="overflow-x:auto"><table><thead><tr><th>Claimed LB</th><th>Gap</th><th>Kaggle #</th><th>Notebook</th><th>Last run</th><th>Our rounds</th></tr></thead><tbody>`;
   h += rows.map(r => `<tr><td class="mono">${typeof r.claimed_score === "number" ? fmtM(r.claimed_score) : "—"}${r.claim_source ? `<div class="dim" style="font-size:11px" title="${esc(r.claim_snippet || "")}">${esc(r.claim_source)}</div>` : ""}</td>
@@ -1607,10 +1724,20 @@ document.addEventListener("click", e => {
     if (confirm(`Discard this setup draft?\n\nYour answers are deleted; the facts already gathered in ${art} stay.`)) act("new:" + art, () => api("/api/new/discard", { artifacts_dir: art }).then(r => { delete S.wiz[art]; return r; }), "Draft discarded");
   }
   else if (a === "steer-add" && p) {
-    const text = (S.ans["steer:" + id] || "").trim(), kind = document.getElementById("steer-kind-" + id).value;
+    const text = (S.ans["steer:" + id] || "").trim(), [kind, rounds] = document.getElementById("steer-kind-" + id).value.split(":");
     if (!text) { toast("Write the direction first", "err"); return; }
-    act("steer:" + id, () => api("/api/steer", { project: id, op: "add", text, kind }).then(r => { delete S.ans["steer:" + id]; return r; }),
-      kind === "standing" ? "Direction added — every round follows it until you remove it" : "Direction sent — the next round reads it");
+    act("steer:" + id, () => api("/api/steer", { project: id, op: "add", text, kind, rounds: +rounds }).then(r => { delete S.ans["steer:" + id]; return r; }),
+      kind === "standing" ? "Direction added — every round follows it until you remove it" : "Direction added at the top of Up next — the next round must follow it or say why not");
+  }
+  else if (a === "q-move" && p) {
+    const q = el.dataset.q, i = +el.dataset.i, delta = +el.dataset.delta, ids = qOrder(q, p);
+    if (q === "engine") act("steer:" + id, () => api("/api/steer", { project: id, op: "pin", id: el.dataset.qid }), "Pinned — it now goes before the engine's other ideas");
+    else if (q === "pins" && delta > 0 && i === ids.length - 1) act("steer:" + id, () => api("/api/steer", { project: id, op: "unpin", id: el.dataset.qid }), "Unpinned — back in the engine's ranking");
+    else { const moved = qMove(ids, i, delta); if (moved) qSave(q, p, moved); }
+  }
+  else if (a === "pin" && p) {
+    const op = el.dataset.op;
+    act("steer:" + id, () => api("/api/steer", { project: id, op, id: el.dataset.pin }), op === "pin" ? "Pinned — it goes before the engine's ranking" : "Unpinned");
   }
   else if (a === "steer-remove" && p) act("steer:" + id, () => api("/api/steer", { project: id, op: "remove", id: el.dataset.d }), "Direction removed");
   else if (a === "steer-old" && p) { e.preventDefault(); S.open.set("steerold:" + id, !S.open.get("steerold:" + id)); render(); }

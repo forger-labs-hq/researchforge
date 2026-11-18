@@ -214,9 +214,9 @@ Winners become the starting point for the next round, independent wins are merge
 | **[Your choice of AI](https://www.researchforgehq.com/docs/drivers)** | Claude Code or Cursor on your plan (no API key), an Anthropic, Gemini or OpenAI key, or a local Ollama model. |
 | **[Compute & GPUs](https://www.researchforgehq.com/docs/compute)** | This machine (CUDA, Apple MPS or CPU), Kaggle GPU with a daily cap on runs, Google Colab through its CLI (Free to Pro+, T4 to H100), your SSH server, or RunPod and Lambda. Setup checks each option and recommends one, with the reason. Competition data stays on the compute you pick. |
 | **[You approve what matters](https://www.researchforgehq.com/docs/submissions)** | **Approve & submit** sends a Kaggle round only after your click, checks Kaggle's daily limit first and never sends a round twice. Repository plans wait for **Approve plan**, where you type `approve`. Shipping a winner is `researchforge ship`. |
-| **Steer it like a chat** | "Stop tuning LightGBM, try a transformer": a direction for the next round or every round, with the proposer's reply under it. Pause, resume, add an idea or rebuild the idea pool from the same page. |
+| **Steer it like a chat** | "Stop tuning LightGBM, try a transformer": a direction for the next round, the next few, or every round, with the proposer's reply under it. **Up next** is one numbered queue: your directions first (newest on top), then ideas you pin, then the engine's own ranking; move any of them with ↑/↓ or drag. A **Next round** banner says what #1 is and when it starts. The next round must follow #1 or say why it can't. Pause, resume, add an idea or rebuild the idea pool from the same page. |
 | **[Questions & notifications](https://www.researchforgehq.com/docs/notifications)** | When the loop needs you, it asks on your phone (ntfy), in the dashboard's 🔔 and on Home. Questions are grouped by competition, and submission offers show how many submissions are left today. An answer that names a settings change (⚙) applies it to Run configs when you pick it, never on its own. Only the ideas a question names wait. Every answer takes a comment that the next proposal follows. A morning briefing sums up the night. |
-| **Runs with nothing open** | Auto-run for competitions and repositories, with daily limits, a time limit per launch, and a wait for the driver's usage limit to reset. |
+| **Runs with nothing open** | Auto-run for competitions and repositories: launches run back to back (the next within 10 minutes), up to 20 rounds a day by default, with a time limit per launch and a wait for the driver's usage limit to reset. Questions waiting for you never stop it. |
 | **Background checks** | Public notebooks every hour (ranked by the score their author claims), new arXiv papers, your submissions being scored, stuck rounds, and your own shell checks. |
 | **Keeps your Kaggle score current** | Public notebooks that claim a better score than yours are tried first: adopted or merged as measured rounds on your compute, then offered to you as submissions. Auto-run builds on them with your directions, arXiv papers and its own results. Nothing from a notebook runs on your machine, and nothing is submitted without **Approve & submit**. |
 | **Knows the metric** | Reads the leaderboard to tell whether lower or higher is better, and says where that came from. |
@@ -235,7 +235,7 @@ Every competition and repository project on the machine, updating live.
 | View | What it's for |
 |---|---|
 | **Home** | Every project at a glance, what to do next, and the questions waiting for you |
-| **Steer** | Directions for the loop, pause and resume, add an idea |
+| **Steer** | Up next: your directions and pinned ideas in your order, the engine's next ideas, pause and resume |
 | **Run configs** | Every setting (compute, AI, auto-run, budgets, metric direction, notifications), editable, with a change log |
 | **Automation** | Background checks, the background service, and auto-run for competitions and repositories |
 | **Runs** | Each round with its score, the AI that proposed it, and its log; archive and restore |

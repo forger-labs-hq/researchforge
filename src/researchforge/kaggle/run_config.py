@@ -276,6 +276,10 @@ def set_auto_run(d: Path, field: str, value: Any, via: str = "") -> tuple[Any, A
             value = int(value)
         except (TypeError, ValueError):
             raise ValueError(f"{key} must be a whole number") from None
+    elif key == "back_to_back":
+        value = (
+            value if isinstance(value, bool) else str(value).lower() in ("1", "true", "yes", "on")
+        )
     else:
         raise ValueError(f"unknown field {field}")
     before = getattr(cfg, key)
@@ -373,6 +377,7 @@ def config_view(d: Path) -> dict[str, Any]:
             "rounds_per_launch": auto.rounds_per_launch,
             "max_rounds_per_day": auto.max_rounds_per_day,
             "max_minutes": auto.max_minutes,
+            "back_to_back": auto.back_to_back,
         },
         "compute": {
             "value": str(setup.get("selected_gpu") or "cpu"),

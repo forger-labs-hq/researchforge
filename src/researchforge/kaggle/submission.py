@@ -23,6 +23,7 @@ from researchforge.kaggle.workspace import atomic_write_json, read_json
 
 OUTPUTS_FILE = "round_outputs.json"
 LOG_FILE = "submissions_made.jsonl"
+REFUSED_FILE = "submissions_refused.jsonl"  # what Kaggle said when it refused one
 _ROUND_IN_QUESTION = re.compile(r"\bSubmit R(\d+)\b")
 
 
@@ -286,45 +287,50 @@ def _log_entries(artifacts_dir: Path) -> list[dict[str, Any]]:
 def daily_allowance(artifacts_dir: Path) -> dict[str, Any] | None:
     """Submissions left today on Kaggle, whose day ends at 00:00 UTC.
 
-    Kaggle's own reply to our last submission today wins. Otherwise it is the
-    competition's daily limit minus today's submissions in the listing the monitor
-    keeps. ``{"remaining", "max", "after_round", "at", "resets_at"}`` (``resets_at``
-    in local time; ``max`` and ``after_round`` may be None), or None when unknown.
+    The lowest of what is known wins: Kaggle's count in its reply to our last
+    submission today that gave one, less our submissions after it (Kaggle's reply
+    does not always carry the count); and the competition's daily limit less today's
+    submissions, ours or in the listing the monitor keeps (it lags a new one).
+    ``{"remaining", "max", "after_round", "at", "resets_at"}`` (``resets_at`` in local
+    time; ``max`` and ``after_round`` may be None), or None when unknown.
     """
     now = datetime.now(UTC)
     resets = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), UTC)
     snap = read_json(artifacts_dir / "submissions.json", {}) or {}
     max_daily = snap.get("max_daily") if isinstance(snap.get("max_daily"), int) else None
+    ours: list[dict[str, Any]] = []  # today's, newest first
     for entry in reversed(_log_entries(artifacts_dir)):
-        m = _REMAINING.search(str(entry.get("reply") or ""))
-        if not m:
-            continue
         try:
             at = datetime.fromisoformat(str(entry["at"])).astimezone(UTC)
         except (KeyError, ValueError):
             break
         if at.date() != now.date():
             break
-        return {
-            "remaining": int(m.group(1)),
-            "max": max_daily,
-            "after_round": entry.get("round"),
-            "at": str(entry["at"]),
-            "resets_at": resets.astimezone().isoformat(timespec="minutes"),
-        }
-    if max_daily is None:
+        ours.append(entry)
+    found: list[tuple[int, Any, str]] = []  # (remaining, after_round, at)
+    for later, entry in enumerate(ours):
+        m = _REMAINING.search(str(entry.get("reply") or ""))
+        if m:
+            last = ours[0]
+            found.append((max(0, int(m.group(1)) - later), last.get("round"), str(last["at"])))
+            break
+    if max_daily is not None:
+        today = now.date().isoformat()
+        listed = sum(
+            1
+            for row in snap.get("submissions") or []
+            if isinstance(row, dict) and str(row.get("date") or "").startswith(today)
+        )
+        used = max(listed, len(ours))
+        found.append((max(0, max_daily - used), None, str(snap.get("fetched_at") or "")))
+    if not found:
         return None
-    today = now.date().isoformat()
-    used = sum(
-        1
-        for row in snap.get("submissions") or []
-        if isinstance(row, dict) and str(row.get("date") or "").startswith(today)
-    )
+    remaining, after_round, since = min(found, key=lambda f: f[0])
     return {
-        "remaining": max(0, max_daily - used),
+        "remaining": remaining,
         "max": max_daily,
-        "after_round": None,
-        "at": str(snap.get("fetched_at") or ""),
+        "after_round": after_round,
+        "at": since,
         "resets_at": resets.astimezone().isoformat(timespec="minutes"),
     }
 
@@ -337,7 +343,7 @@ def _limit_reached(artifacts_dir: Path) -> str:
     if left["after_round"] is None:
         used = f"all {left['max']} of today's submissions are used"
     else:
-        used = f"after R{left['after_round']} ({left['at'][11:16]}) Kaggle said 0 remain today"
+        used = f"none are left after R{left['after_round']} ({left['at'][11:16]})"
     return (
         f"Kaggle's daily submission limit is used up: {used}. It resets at 00:00 UTC "
         f"({resets} here); the question stays open, approve it again then"
@@ -388,18 +394,27 @@ def _submit(artifacts_dir: Path, slug: str, round_num: int, title: str) -> str:
     refused = re.search(r"\b(error|forbidden|exceeded|not allowed|failed)\b", reply, re.I)
     if proc.returncode != 0 or (refused and "Successfully" not in reply):
         said = _OUTDATED_CLI.sub("", reply).strip()
+        with (artifacts_dir / REFUSED_FILE).open("a", encoding="utf-8") as fh:
+            refusal = {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "round": round_num,
+                "command": cmd[:-2],
+                "exit_code": proc.returncode,
+                "reply": said[-2000:],
+            }
+            fh.write(json.dumps(refusal) + "\n")
         limit = _limit_reached(artifacts_dir)
         if limit and re.search(r"\b400\b|limit|exceeded", said, re.I):
             raise ValueError(limit)
         if re.search(r"\b400\b", said):
             raise ValueError(
-                "Kaggle refused the submission (400 Bad Request, with no reason given). The "
+                f"Kaggle refused R{round_num} (400 Bad Request, with no reason given). The "
                 "usual causes: today's submission limit is used up (it resets at 00:00 UTC), or "
                 "for a notebook submission, Kaggle cannot re-run that notebook version or it "
                 "wrote no submission file. "
                 f"Kaggle said: {said[-200:]}"
             )
-        raise ValueError(f"Kaggle refused the submission: {said[-300:] or proc.returncode}")
+        raise ValueError(f"Kaggle refused R{round_num}: {said[-300:] or proc.returncode}")
     entry = {
         "at": datetime.now().isoformat(timespec="seconds"),
         "round": round_num,

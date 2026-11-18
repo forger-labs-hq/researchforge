@@ -451,6 +451,9 @@ class OvernightExperimentLoop:
             source_credit=proposal.source_credit,
             hypothesis=proposal.hypothesis,
         )
+        from researchforge.kaggle.steering import record_round
+
+        record_round(self.setup.artifacts_dir, round_num, proposal.as_record())
 
         # 3. Constraint check
         if self._violates_constraints(proposal.code_changes):

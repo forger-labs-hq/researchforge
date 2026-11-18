@@ -528,12 +528,19 @@ def steer_cmd(
         str, typer.Option("--reply", help="Answer this direction id (the proposer does this)")
     ] = "",
     remove: Annotated[str, typer.Option("--remove", help="Remove this direction id")] = "",
+    rounds: Annotated[
+        int, typer.Option("--rounds", help="How many rounds must follow it (next-round only)")
+    ] = 1,
+    order: Annotated[
+        str, typer.Option("--order", help="Comma-separated direction ids to put first, in order")
+    ] = "",
     as_json: Annotated[bool, typer.Option("--json", help="Print JSON")] = False,
 ) -> None:
-    """Steer the research: add a direction, answer one, remove one — or list them.
+    """Steer the research: add a direction, answer one, remove one, reorder — or list them.
 
-    Without --standing a direction is for the next round only. The next prepare-round
-    hands it to the proposer, who answers it once with --reply.
+    Without --standing a direction is for the next round (or --rounds N): it goes to the
+    top of Up next and stays until that many rounds have followed it. The next
+    prepare-round hands it to the proposer, who answers it once with --reply.
     """
     from researchforge.kaggle import steering
 
@@ -547,10 +554,20 @@ def steer_cmd(
             hit = steering.remove(d, remove)
             typer.secho(f"✅ Removed {hit.id}: {hit.text}", fg=typer.colors.GREEN)
             return
-        if text.strip():
-            hit = steering.add(d, text, "standing" if standing else "next", via="cli")
-            when = "every round until removed" if standing else "the next round"
-            typer.secho(f"✅ {hit.id} added for {when}.", fg=typer.colors.GREEN)
+        if order.strip():
+            steering.reorder(d, [i.strip() for i in order.split(",") if i.strip()])
+            typer.secho("✅ Reordered.", fg=typer.colors.GREEN)
+        elif text.strip():
+            kind = "standing" if standing else "next"
+            hit = steering.add(d, text, kind, via="cli", rounds=rounds)
+            when = (
+                "every round until removed"
+                if standing
+                else "the next round"
+                if rounds == 1
+                else f"the next {rounds} rounds"
+            )
+            typer.secho(f"✅ {hit.id} added at the top of Up next, for {when}.", fg="green")
             return
     except (KeyError, ValueError) as exc:
         typer.secho(f"❌ {str(exc).strip(chr(39))}", fg=typer.colors.RED, err=True)
@@ -562,9 +579,50 @@ def steer_cmd(
     if not items:
         typer.echo("No directions yet.")
     for i in items:
-        typer.echo(f"{i.id} [{i.kind}, {i.status}] {i.text}")
+        followed = f", followed by R{', R'.join(map(str, i.followed_by))}" if i.followed_by else ""
+        typer.echo(f"{i.id} [{i.kind}, {i.status}{followed}] {i.text}")
         for r in i.replies:
             typer.echo(f"    ↳ {r['by']}: {r['text']}")
+        for x in i.declined:
+            typer.echo(f"    ✗ declined by R{x['round']}: {x['reason']}")
+    queue = steering.up_next(d)
+    if queue:
+        typer.echo("\nUp next:")
+        for item in queue:
+            typer.echo(f"  {item['place']}. [{item['id']}] {item['text'][:120]}")
+
+
+@kaggle_app.command("pin")
+def pin_cmd(
+    competition: SlugArg,
+    idea: Annotated[
+        str, typer.Argument(help="A pool idea, as prepare-round shows it, or its p-id")
+    ] = "",
+    place: Annotated[
+        int, typer.Option("--place", help="Its place among pinned ideas (1 = first)")
+    ] = 0,
+    remove: Annotated[bool, typer.Option("--remove", help="Unpin it")] = False,
+) -> None:
+    """Pin an idea so it is tried before the engine's ranking — or list pinned ideas.
+
+    Pinned ideas come after your next-round directions in Up next, in the order you set.
+    """
+    from researchforge.kaggle import hypothesis_pool as pool
+
+    d = _artifacts(competition)
+    try:
+        if idea.strip():
+            pins = pool.unpin(d, idea) if remove else pool.pin(d, idea, place or None)
+            typer.secho("✅ " + ("Unpinned." if remove else "Pinned."), fg=typer.colors.GREEN)
+        else:
+            pins = pool.pinned(d)
+    except ValueError as exc:
+        typer.secho(f"❌ {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if not pins:
+        typer.echo("No pinned ideas.")
+    for h in pins:
+        typer.echo(f"  {h['pin']}. [{h['pin_id']}] {str(h['idea'])[:140]}")
 
 
 @kaggle_app.command("skip-idea")

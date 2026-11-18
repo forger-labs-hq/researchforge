@@ -460,6 +460,30 @@ def _overnight_merge_candidate(rows: list[dict[str, Any]]) -> dict[str, Any] | N
     }
 
 
+def _engine_next(d: Path, direction: str, limit: int = 5) -> list[dict[str, Any]]:
+    """The engine's own next ideas after the pinned ones, for the Up next queue."""
+    from researchforge.kaggle.hypothesis_pool import pin_id, rank_untested
+
+    try:
+        ranked = rank_untested(d, direction)
+    except Exception:  # a half-written pool must not break the whole view
+        return []
+    return [
+        {"pin_id": pin_id(str(h["idea"])), "text": str(h["idea"]), "why": _why_next(h)}
+        for h in ranked
+        if h.get("pin") is None
+    ][:limit]
+
+
+def _why_next(h: dict[str, Any]) -> str:
+    gap = h.get("claim_vs_our_best")
+    if isinstance(gap, (int, float)) and gap > 0:
+        return f"notebook claims +{gap:.4g} over our best"
+    if h.get("source") == "user":
+        return "added by you"
+    return f"{h.get('metric_confidence') or 'unknown'} confidence"
+
+
 def _hypothesis_from_pool(i: int, h: dict[str, Any]) -> dict[str, Any]:
     src = str(h.get("source") or "unknown")
     return {
@@ -826,11 +850,31 @@ def _read_overnight(d: Path, slug: str, sibling_setups: list[str]) -> dict[str, 
         _issue(issues, "error", "pending_hypotheses.json is unreadable (partial write?)")
     pool = pool_raw if isinstance(pool_raw, list) else []
     hypotheses = [_hypothesis_from_pool(i, h) for i, h in enumerate(pool) if isinstance(h, dict)]
+    from researchforge.kaggle.hypothesis_pool import idea_key, pin_id, pinned
+
+    pins = {idea_key(str(h["idea"])): h["pin"] for h in pinned(d)}
+    for h, raw in zip(hypotheses, (x for x in pool if isinstance(x, dict)), strict=True):
+        idea = str(raw.get("idea") or "")
+        h["pin_id"] = pin_id(idea) if idea else ""
+        h["pin"] = pins.get(idea_key(idea))
     by_round = {e["id"]: e for e in experiments}
     for h in hypotheses:
         for rid in h["tested_by"]:
             if rid in by_round:
                 by_round[rid]["hypothesis_ids"].append(h["id"])
+    # What your directions and pinned ideas led to: the rounds and the ideas they tested.
+    from researchforge.kaggle.steering import steered_rounds
+
+    steered = steered_rounds(d)
+    for e in experiments:
+        e["steered"] = steered.get(int(e.get("num") or 0), [])
+    for h in hypotheses:
+        h["steered"] = [
+            g
+            for rid in h["tested_by"]
+            for g in by_round.get(rid, {}).get("steered", [])
+            if g.get("how") == "followed"
+        ]
 
     proposal = read_json(d / "proposal.json", None)
     pending_proposal = None
@@ -956,6 +1000,8 @@ def _read_overnight(d: Path, slug: str, sibling_setups: list[str]) -> dict[str, 
         "sensors": _sensor_rows(d, slug, watcher, monitor_state),
         "draft": draft,
         "steering": [asdict(x) for x in steering.load(d)],
+        "up_next": steering.up_next(d) if setup else [],
+        "engine_next": _engine_next(d, direction, limit=10) if setup else [],
         "auto_run": _auto_run_view(d, slug),
         "run_config": _run_config_view(d),
         "submissions_snapshot": read_json(d / "submissions.json", None),

@@ -503,3 +503,24 @@ class TestUsageLimits:
         assert any("usage limit" in g for g in ar.gates(d, ar.AutoRunConfig.load(d)))
         ar.set_driver(d, "byok")  # another driver is not held back by Claude's limit
         assert not any("usage limit" in g for g in ar.gates(d, ar.AutoRunConfig.load(d)))
+
+
+def test_launches_run_back_to_back_and_questions_never_stop_them(tmp_path: Path) -> None:
+    """Defaults: 20 rounds a day, the next launch within minutes; only a held question stops it."""
+    from researchforge.kaggle.run_config import set_field
+
+    d = _project(tmp_path)
+    cfg = ar.AutoRunConfig.load(d)
+    assert (cfg.max_rounds_per_day, cfg.back_to_back) == (20, True)
+    sub = d / "submission.csv"
+    sub.write_text("id,y\n")
+    from researchforge.kaggle import submission
+
+    submission.record_round_outputs(d, 1, {"submission_file": str(sub)})
+    control.ask(d, "Submit R1 to Kaggle?", options=["yes", "no"])
+    control.ask(d, "Which loss next?", options=["a", "b"])
+    assert not any("question" in g for g in ar.gates(d, cfg))
+    control.ask(d, "Stop everything until I look?", options=["ok"], holds_loop=True)
+    assert any("on hold" in g for g in ar.gates(d, cfg))
+    assert set_field(d, "auto_run_back_to_back", "false") == (True, False)
+    assert ar.AutoRunConfig.load(d).back_to_back is False

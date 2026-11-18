@@ -154,6 +154,8 @@ SUBMISSION_POLL_MINUTES = 15.0
 # Public notebooks change within hours (new versions with better scores); every 6 hours
 # left the pool and the notebook board a cycle behind.
 KERNEL_POLL_MINUTES = 60.0
+# Auto-run with back_to_back: how soon after a launch ends the next may start.
+AUTO_RUN_POLL_MINUTES = 10.0
 SUBMISSION_NOTICES_FILE = "submission_notices.json"
 
 
@@ -207,6 +209,9 @@ def monitor_cmd(
     Every --kernel-minutes (and with each cycle):
       • New and re-run public notebooks → ideas injected, the ranked notebook
         board (kernel_board.json) rebuilt → ntfy if one claims a better LB than ours
+
+    Every 10 minutes, when auto-run is on with back_to_back:
+      • The next launch starts once the last has ended and the gates pass
 
     Every --poll-hours:
       • Experiment heartbeat → ntfy if execute_round.lock is stale (hung experiment)
@@ -463,6 +468,22 @@ def monitor_cmd(
         _sensors.save_state(artifacts_dir, state)
         _round_followups(artifacts_dir)
 
+    def _auto_run_between_cycles() -> None:
+        """With back_to_back, a launch follows the last one within minutes."""
+        from researchforge.kaggle.auto_run import AutoRunConfig, current_launch, sensor_check
+
+        name = "auto_run_sensor"
+        if not _sensors.is_enabled(_sensors.load_config(artifacts_dir, slug), name):
+            return
+        if not AutoRunConfig.load(artifacts_dir).back_to_back or current_launch(artifacts_dir):
+            return
+        try:
+            status, detail = sensor_check(artifacts_dir, slug)
+            _sensors.record(state, name, status, detail)
+        except Exception as exc:
+            _sensors.record(state, name, "error", error=f"{type(exc).__name__}: {exc}")
+        _sensors.save_state(artifacts_dir, state)
+
     def _kernels_between_cycles() -> None:
         """New public notebooks reach the pool and the board within the hour."""
         name = "kernel_watcher_sensor"
@@ -487,16 +508,19 @@ def monitor_cmd(
         except Exception as exc:
             typer.echo(f"[monitor] error: {exc}", err=True)
         due = datetime.now() + _td(hours=poll_hours)
-        steps = [m for m in (submission_minutes, kernel_minutes) if m > 0]
+        steps = [m for m in (submission_minutes, kernel_minutes, AUTO_RUN_POLL_MINUTES) if m > 0]
         step = _td(minutes=min(steps)) if steps else None
         next_kernels = datetime.now() + _td(minutes=kernel_minutes) if kernel_minutes > 0 else None
+        next_subs = datetime.now() + _td(minutes=submission_minutes)
         while step is not None and datetime.now() + step < due:
             _wait_until_due(datetime.now() + step)
-            if submission_minutes > 0:
+            if submission_minutes > 0 and datetime.now() >= next_subs:
                 _submissions_between_cycles()
+                next_subs = datetime.now() + _td(minutes=submission_minutes)
             if next_kernels is not None and datetime.now() >= next_kernels:
                 _kernels_between_cycles()
                 next_kernels = datetime.now() + _td(minutes=kernel_minutes)
+            _auto_run_between_cycles()
         _wait_until_due(due)
 
 
@@ -2391,6 +2415,7 @@ def prepare_round(
     from researchforge.kaggle import steering as _steering
 
     directions = _steering.mark_round(artifacts_dir, round_num)
+    up_next = _steering.up_next(artifacts_dir)
 
     # Load all previous rounds
     from researchforge.kaggle.experiment_loop import load_rounds
@@ -2518,6 +2543,9 @@ def prepare_round(
             if directions
             else ""
         ),
+        # The person's queue: next-round directions, then pinned ideas. Its head comes first.
+        "up_next": up_next,
+        "up_next_note": _steering.FOLLOW_RULE if up_next else "",
         # What the repo engine tried before this loop was the only engine. Its scores
         # come from another benchmark: read them as outcomes, not as numbers to beat.
         "earlier_repo_experiments": _earlier_repo_work(artifacts_dir),
@@ -2531,8 +2559,9 @@ def prepare_round(
             "there, and judge it by our own benchmark."
         ),
         "recommended_next": (
+            (up_next[0]["text"] if up_next else None)
             # Prefer high/medium confidence first for fast feedback
-            next(
+            or next(
                 (
                     h["idea"]
                     for h in tagged_pool
@@ -2571,6 +2600,8 @@ def prepare_round(
             "docker_image": "<optional: the Kaggle Docker image a ported notebook needs>",
             "machine_shape": "<optional: Kaggle GPU type, e.g. 'NvidiaTeslaT4'>",
             "hypothesis": "<exact 'idea' text from hypothesis_pool this proposal tests, or empty>",
+            "follows": "<ids from up_next this round follows, e.g. ['d-1a2b3c']; [] for none>",
+            "declines": "<{'<up_next id>': '<why this round cannot follow it>'}, or {}>",
         },
         # AI self-hypothesize: Claude can add its own ideas to the pool.
         # After reading the results above, if you see a promising direction
@@ -3195,6 +3226,19 @@ def execute_round(
         )
         raise typer.Exit(1)
 
+    # The head of the person's Up next queue is followed or declined with a reason.
+    from researchforge.kaggle import steering as _steering
+
+    try:
+        _proposed = json.loads(proposal_path.read_text())
+    except ValueError as exc:
+        typer.secho(f"❌ {proposal_path.name} is not valid JSON: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from None
+    _ignored = _steering.check_proposal(artifacts_dir, _proposed)
+    if _ignored:
+        typer.secho(f"❌ Not run: {_ignored}.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
     # A lock left by a process that died is released, and its round recorded as interrupted.
     from researchforge.kaggle.experiment_loop import recover_interrupted_round
 
@@ -3270,6 +3314,7 @@ def execute_round(
         row = conn.execute("SELECT MAX(round_num) FROM experiments").fetchone()
         if row and row[0] is not None:
             round_num = row[0] + 1
+    _steering.record_round(artifacts_dir, round_num, proposal_data)
 
     rnd = ExperimentRound(
         round_num=round_num,
@@ -3482,6 +3527,21 @@ def run_parallel(
             err=True,
         )
         raise typer.Exit(1)
+    # One proposal in the batch follows (or declines) the head of the person's Up next.
+    from researchforge.kaggle import steering as _steering
+
+    _verdicts = []
+    for path in proposal_files:
+        try:
+            _verdicts.append(_steering.check_proposal(artifacts_dir, json.loads(path.read_text())))
+        except ValueError as exc:
+            typer.secho(f"❌ {path.name} is not valid JSON: {exc}", fg="red", err=True)
+            raise typer.Exit(1) from None
+    if all(_verdicts):
+        typer.secho(
+            f"❌ Not run: no proposal follows Up next — {_verdicts[0]}.", fg="red", err=True
+        )
+        raise typer.Exit(1)
 
     n = len(proposal_files)
     workers = max_workers if max_workers > 0 else n
@@ -3526,6 +3586,7 @@ def run_parallel(
         with db_lock:
             round_num = _round_counter[0]
             _round_counter[0] += 1
+            _steering.record_round(artifacts_dir, round_num, proposal_data)
 
         rnd = ExperimentRound(
             round_num=round_num,
