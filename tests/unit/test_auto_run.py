@@ -205,6 +205,27 @@ class TestLaunches:
         assert last["status"] == "finished" and last["rounds_run"] == 1
         assert sent and "1 round(s) ran" in sent[0]
 
+    def test_a_claude_launch_logs_its_reply_and_meters_every_model(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        d = _project(tmp_path)
+        reply = {"result": "I ran 2 rounds.", "is_error": False, "modelUsage": _MODELS}
+        agent = _fake_cli(tmp_path, f"print({json.dumps(reply)!r})")
+        assert "json" in ar.build_command(d, SLUG, ar.AutoRunConfig(driver="claude"))
+        ar.AutoRunConfig(driver="claude", cli_path=agent).save(d)
+        monkeypatch.setattr(control, "notify", lambda *a, **k: True)
+        with (d / ar.LOG_FILE).open("a") as log:
+            monkeypatch.setattr(sys, "stdout", log)
+            assert ar.run_child(d, SLUG) == 0
+        text = (d / ar.LOG_FILE).read_text()
+        assert "I ran 2 rounds." in text and '"modelUsage"' not in text  # the words, not JSON
+        rows = [json.loads(ln) for ln in (d / "token_usage.jsonl").read_text().splitlines()]
+        assert {r["model"] for r in rows} == {"claude-opus-5-5", "claude-haiku-5-5"}
+        assert all(r["purpose"] == "auto_run" for r in rows)
+        opus = next(r for r in rows if r["model"] == "claude-opus-5-5")
+        assert opus["input_tokens"] == 1914 and opus["cache_write_tokens"] == 1912
+        assert ar.load_state(d)["last"]["cost_usd"] == pytest.approx(0.02)
+
     def test_a_launch_past_its_limit_is_stopped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -384,6 +405,46 @@ class TestSensorsUseTheDriver:
         agent = ar.AgentCLIProvider("claude", _claude_json(tmp_path, code=3))
         with pytest.raises(RuntimeError, match="exited 3"):
             agent.generate("s", "u")
+
+    def test_a_prompt_starting_with_a_dash_is_sent_on_stdin_and_cached_tokens_count(
+        self, tmp_path: Path
+    ) -> None:
+        from researchforge.ai.usage import recording
+
+        reply = {"result": "[]", "is_error": False, "total_cost_usd": 0.017, "modelUsage": _MODELS}
+        agent = ar.AgentCLIProvider(
+            "claude",
+            _fake_cli(
+                tmp_path,
+                "import sys\n"
+                "assert not any(a.startswith('- ') for a in sys.argv), sys.argv\n"
+                "assert sys.stdin.read() == '- Fast GBDT (by a)'\n"
+                f"print({json.dumps(reply)!r})",
+            ),
+        )
+        with recording() as ledger:
+            assert agent.generate("sys", "- Fast GBDT (by a)") == "[]"
+        call = ledger.calls[0]
+        assert call.model == "claude-opus-5-5"  # the model that answered, not "default"
+        assert call.usage.input_tokens == 2 + 1912 + 100 and call.usage.output_tokens == 85 + 9
+        assert call.usage.cache_read_tokens == 100 and call.usage.cost_usd == pytest.approx(0.02)
+
+
+_MODELS = {
+    "claude-opus-5-5": {
+        "inputTokens": 2,
+        "outputTokens": 85,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 1912,
+        "costUSD": 0.017,
+    },
+    "claude-haiku-5-5": {
+        "inputTokens": 0,
+        "outputTokens": 9,
+        "cacheReadInputTokens": 100,
+        "costUSD": 0.003,
+    },
+}
 
 
 class TestRoundsAndStopping:

@@ -30,10 +30,19 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Usage:
-    """Tokens consumed by one model call."""
+    """Tokens consumed by one model call.
+
+    ``input_tokens`` counts every prompt token the model read, cached or not;
+    the cache fields say how many of those were cache reads and writes, which
+    bill at different rates. ``cost_usd`` is set only when the provider itself
+    reported a cost (Claude Code does), so it is a measurement, not a guess.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost_usd: float | None = None
 
     @property
     def total(self) -> int:

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.6 — Token metering that counts, and kernel ideas through Claude (2026-11-19)
+
+- **Kernel-idea extraction works through the Claude driver.** The prompt (a list of notebook
+  titles, one "- " per line) was passed as an argument, which Claude Code read as an unknown
+  option, so every extraction failed within a second and was logged as a 0-token call. The
+  prompt now goes on stdin.
+- **Insights counts the tokens auto-run actually uses.** Claude launches ran with text
+  output, so the rounds themselves were never metered. They now ask Claude Code for its JSON
+  reply: the log still gets the reply's text, and `token_usage.jsonl` gets one `auto_run` row
+  per model the launch used, with cached input counted (it was dropped, so a call showed
+  about 2 input tokens) and Claude Code's own reported cost. The launch record carries
+  `cost_usd`. Sensor calls are logged under the model that answered instead of "default".
+- **Insights says which tokens are which.** The tile reads **Tokens in / out**. The summary
+  says what input and output mean, how much input came from cache, and which part of the cost
+  was reported by Claude Code (the API-equivalent price; on a subscription it counts toward
+  your plan's limits) and which was estimated from list prices. The per-model table adds
+  "of which cached" and Cost columns. Rounds you drive from your own Claude Code chat still
+  can't be metered, and the page says so.
+
 ## 0.4.5 — Up next: steer the queue, and auto-run keeps going (2026-11-18)
 
 - **Auto-run keeps experimenting.** Launches now run back to back: when one ends, the next

@@ -311,6 +311,28 @@ class TestState:
         (d / "user_answers.json").write_text('{"x": 1}')  # answered after the questions
         assert _project(dashboard_state.build_state(tmp_path), d)["state"] != "waiting"
 
+    def test_a_reported_cost_beats_list_prices_and_cached_input_is_shown(self) -> None:
+        calls = [
+            {
+                "model": "claude-opus-5-5",
+                "input_tokens": 2014,
+                "output_tokens": 94,
+                "cache_read_tokens": 100,
+                "cost_usd": 0.02,
+                "purpose": "auto_run",
+            },
+            {"model": "claude-sonnet-4", "input_tokens": 1_000_000, "output_tokens": 0},
+        ]
+        t = dashboard_state._tokens(calls, "claude_code")
+        assert (t["input_tokens"], t["output_tokens"], t["cache_read_tokens"]) == (
+            1_002_014,
+            94,
+            100,
+        )
+        assert t["reported_cost_usd"] == 0.02 and t["estimated_cost_usd"] == pytest.approx(3.02)
+        assert t["by_model"]["claude-opus-5-5"]["cost_usd"] == 0.02
+        assert t["unobservable"] and "own Claude Code chat" in t["note"]
+
     def test_metered_provider_keeps_the_callers_round_label(self, tmp_path: Path) -> None:
         from researchforge.ai.usage import Usage, purpose, record_call
         from researchforge.kaggle.token_log import metered

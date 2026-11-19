@@ -3,12 +3,15 @@
 Kaggle commands that call a model directly (idea extraction, ideation,
 resynthesize, arXiv scans, setup) wrap their provider with :func:`metered`.
 Each call appends one JSON line ``{ts, purpose, provider, model,
-input_tokens, output_tokens, duration_seconds}`` that the dashboard's Insights
-view aggregates.
+input_tokens, output_tokens, duration_seconds}`` (plus ``cache_read_tokens``,
+``cache_write_tokens`` and ``cost_usd`` when the provider reports them) that
+the dashboard's Insights view aggregates. ``input_tokens`` includes cached
+prompt tokens. Auto-run launches with the Claude driver add one ``auto_run``
+row per model the launch used (:func:`log_usage`).
 
-Work Claude does inside Claude Code (proposals in ``ai_provider_mode:
-claude_code``) never passes through a provider and so is not — and cannot
-be — metered here; the dashboard says so instead of showing zero cost.
+Rounds someone drives from their own Claude Code chat never pass through
+ResearchForge and so are not — and cannot be — metered here; the dashboard
+says so instead of showing zero cost.
 """
 
 from __future__ import annotations
@@ -45,29 +48,59 @@ class MeteredProvider:
                 _append(self._artifacts_dir, ledger.calls)
 
 
-def _append(artifacts_dir: Path, calls: Any) -> None:
-    if not calls:
+def _row(
+    purpose: str, provider: str, model: str, usage: Any, duration_seconds: float
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "purpose": purpose,
+        "provider": provider,
+        "model": model,
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "duration_seconds": round(duration_seconds, 3),
+    }
+    # Cache counts and a provider-reported cost only when there are any, so rows
+    # from plain API calls stay as they were.
+    for key in ("cache_read_tokens", "cache_write_tokens"):
+        if getattr(usage, key, 0):
+            row[key] = getattr(usage, key)
+    if getattr(usage, "cost_usd", None) is not None:
+        row["cost_usd"] = round(usage.cost_usd, 6)
+    return row
+
+
+def _write(artifacts_dir: Path, rows: list[dict[str, Any]]) -> None:
+    if not rows:
         return
     try:
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         with (artifacts_dir / TOKEN_LOG).open("a", encoding="utf-8") as fh:
-            for c in calls:
-                fh.write(
-                    json.dumps(
-                        {
-                            "ts": datetime.now().isoformat(timespec="seconds"),
-                            "purpose": c.purpose,
-                            "provider": c.provider,
-                            "model": c.model,
-                            "input_tokens": c.usage.input_tokens,
-                            "output_tokens": c.usage.output_tokens,
-                            "duration_seconds": round(c.duration_seconds, 3),
-                        }
-                    )
-                    + "\n"
-                )
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
     except OSError:
         pass  # metering must never break the call it measures
+
+
+def _append(artifacts_dir: Path, calls: Any) -> None:
+    _write(
+        artifacts_dir,
+        [_row(c.purpose, c.provider, c.model, c.usage, c.duration_seconds) for c in calls or []],
+    )
+
+
+def log_usage(
+    artifacts_dir: Path,
+    *,
+    purpose: str,
+    provider: str,
+    model: str,
+    usage: Any,
+    duration_seconds: float = 0.0,
+    **extra: Any,
+) -> None:
+    """Append one row for work that did not go through a provider (an auto-run launch)."""
+    _write(artifacts_dir, [{**_row(purpose, provider, model, usage, duration_seconds), **extra}])
 
 
 def metered(provider: Any, artifacts_dir: Path, purpose: str) -> Any:

@@ -36,6 +36,7 @@ class _Meter:
     """Carries one call's usage from inside the request to the ledger."""
 
     usage: Usage = field(default_factory=Usage)
+    model: str = ""  # the model that actually answered, when the reply names it
 
 
 @contextmanager
@@ -55,7 +56,7 @@ def _metered(name: str) -> Iterator[_Meter]:
         record_call(
             purpose=current_purpose(),
             provider=provider,
-            model=model or name,
+            model=meter.model or model or name,
             usage=meter.usage,
             duration_seconds=time.monotonic() - started,
         )

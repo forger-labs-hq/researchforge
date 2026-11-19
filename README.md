@@ -243,7 +243,7 @@ Every competition and repository project on the machine, updating live.
 | **Hypotheses** | The idea pool, where each idea came from, what tested it, what was rejected and why |
 | **Submissions** | What went to Kaggle, its scores, and how many submissions are left today |
 | **Timeline** | Deadline countdown, runs, checks and notifications in order |
-| **Insights** | Improvement rate, metric progression per project, and AI token use |
+| **Insights** | Improvement rate, metric progression per project, and AI token use: input and output tokens per model (cached input shown), with the cost Claude Code reports for auto-run launches and sensor calls |
 | **＋ New competition** | Paste a Kaggle URL, answer the setup questions as a form, start |
 | **Keys & accounts** | Set and test every key and sign-in |
 

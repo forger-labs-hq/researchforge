@@ -1404,41 +1404,53 @@ def _tokens(calls: list[dict[str, Any]], mode: str) -> dict[str, Any]:
     by_model: dict[str, dict[str, Any]] = {}
     by_purpose: dict[str, int] = {}
     by_round: dict[str, int] = {}  # proposal tokens per overnight round (autonomous mode)
-    tin = tout = 0
-    cost = 0.0
+    tin = tout = cached = 0
+    cost = reported = 0.0
     unpriced = False
     for c in calls:
         i, o = int(c.get("input_tokens") or 0), int(c.get("output_tokens") or 0)
-        tin, tout = tin + i, tout + o
-        m = by_model.setdefault(c.get("model") or "unknown", {"calls": 0, "input": 0, "output": 0})
+        cr = int(c.get("cache_read_tokens") or 0)
+        tin, tout, cached = tin + i, tout + o, cached + cr
+        m = by_model.setdefault(
+            c.get("model") or "unknown",
+            {"calls": 0, "input": 0, "output": 0, "cache_read": 0, "cost_usd": 0.0},
+        )
         m["calls"] += 1
         m["input"] += i
         m["output"] += o
+        m["cache_read"] += cr
         by_purpose[c.get("purpose") or "other"] = (
             by_purpose.get(c.get("purpose") or "other", 0) + i + o
         )
         rm = re.fullmatch(r"proposal_round_(\d+)", c.get("purpose") or "")
         if rm:
             by_round[f"R{rm.group(1)}"] = by_round.get(f"R{rm.group(1)}", 0) + i + o
-        # Local Ollama models cost compute, not tokens.
-        p = [0.0, 0.0] if c.get("provider") == "ollama" else price(c.get("model") or "")
-        if p is not None:
-            cost += i / 1e6 * p[0] + o / 1e6 * p[1]
-        elif i or o:
-            unpriced = True
+        # A cost the provider reported (Claude Code does) beats list prices, which
+        # know nothing of cache discounts. Local Ollama models cost compute, not tokens.
+        if isinstance(c.get("cost_usd"), (int, float)):
+            one = float(c["cost_usd"])
+            reported += one
+        else:
+            p = [0.0, 0.0] if c.get("provider") == "ollama" else price(c.get("model") or "")
+            one = i / 1e6 * p[0] + o / 1e6 * p[1] if p is not None else 0.0
+            unpriced = unpriced or (p is None and bool(i or o))
+        cost += one
+        m["cost_usd"] = round(m["cost_usd"] + one, 4)
     return {
         "calls": len(calls),
         "input_tokens": tin,
         "output_tokens": tout,
+        "cache_read_tokens": cached,
         "estimated_cost_usd": round(cost, 4) if calls else None,
+        "reported_cost_usd": round(reported, 4),
         "has_unpriced": unpriced,
         "by_model": by_model,
         "by_purpose": by_purpose,
         "by_round": by_round,
         "unobservable": mode == "claude_code",
         "note": (
-            "Proposals in claude_code mode are generated inside Claude Code; those tokens "
-            "are not visible to ResearchForge."
+            "Auto-run launches and sensor calls are metered. Rounds you drive from your own "
+            "Claude Code chat are not: those tokens never pass through ResearchForge."
             if mode == "claude_code"
             else ""
         ),

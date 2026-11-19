@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "researchforge",
   "displayName": "ResearchForge",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Kaggle Overnight (/researchforge:overnight) and an evidence-first research loop for Claude Code: frozen baselines, isolated git-worktree experiments, repeated validation, and every rejected idea kept with its reason. Skills drive the researchforge CLI (pip install researchforge).",
   "author": {
     "name": "Forger Labs HQ",

@@ -242,6 +242,7 @@ function ago(ts) {
 function localNow() { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); }
 const when = ts => ts ? `<span title="${esc(ts)}" data-ts="${esc(ts)}">${ago(ts)}</span>` : '<span class="dim">—</span>';
 const DRIVER_NAMES = { claude: "Claude Code", cursor: "Cursor agent", byok: "API key", manual: "manual" };
+const fmtTok = n => n >= 1e9 ? (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n.toLocaleString();
 const fmtM = v => typeof v === "number" ? (Math.abs(v) >= 1000 ? v.toFixed(1) : v.toFixed(4)) : "—";
 const plural = (n, w) => `${n} ${n === 1 ? w : /is$/.test(w) ? w.slice(0, -2) + "es" : w + "s"}`;
 function dur(s) { if (!s) return "—"; s = Math.round(s); return s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "m" : (s / 3600).toFixed(1) + "h"; }
@@ -1502,9 +1503,9 @@ function vInsights() {
   const ps = projects().filter(p => p.role === "primary" || S.route.p !== "all");
   const exps = ps.flatMap(p => p.experiments), imp = exps.filter(e => e.status === "improved").length, fail = exps.filter(e => e.status === "failed").length;
   const hyps = ps.flatMap(p => p.hypotheses), tested = hyps.filter(h => h.tested).length;
-  const tok = ps.reduce((a, p) => ({ i: a.i + p.tokens.input_tokens, o: a.o + p.tokens.output_tokens, c: a.c + (p.tokens.estimated_cost_usd || 0), n: a.n + p.tokens.calls }), { i: 0, o: 0, c: 0, n: 0 });
+  const tok = ps.reduce((a, p) => ({ i: a.i + p.tokens.input_tokens, o: a.o + p.tokens.output_tokens, r: a.r + (p.tokens.cache_read_tokens || 0), c: a.c + (p.tokens.estimated_cost_usd || 0), rc: a.rc + (p.tokens.reported_cost_usd || 0), n: a.n + p.tokens.calls }), { i: 0, o: 0, r: 0, c: 0, rc: 0, n: 0 });
   const tiles = [["Experiments", exps.length, "var(--accent)"], ["Improved", imp, "var(--green)"], ["Improvement rate", exps.length ? Math.round(imp / exps.length * 100) + "%" : "—", "var(--green)"],
-    ["Failed", fail, "var(--red)"], ["Hypotheses tested", `${tested}/${hyps.length}`, "var(--purple)"], ["Tokens metered", tok.n ? (tok.i + tok.o).toLocaleString() : "0", "var(--amber)"]];
+    ["Failed", fail, "var(--red)"], ["Hypotheses tested", `${tested}/${hyps.length}`, "var(--purple)"], ["Tokens in / out", tok.i + tok.o ? `${fmtTok(tok.i)} <span class="dim">/</span> ${fmtTok(tok.o)}` : "0", "var(--amber)"]];
   let h = `<div class="grid g4 mb">${tiles.map(([l, v, c]) => `<div class="card stat"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div></div>`).join("")}</div>`;
   h += `<div class="card mb"><div class="tbl"><table><thead><tr><th>Project</th><th>Runs</th><th>Improved</th><th>Rate</th><th>Baseline</th><th>Best</th><th>Metric progression</th></tr></thead><tbody>${ps.filter(p => p.experiments.length && match(p.name)).map(p => {
     const e = p.experiments, i = e.filter(x => x.status === "improved").length, bl = e.find(x => typeof x.baseline === "number");
@@ -1513,15 +1514,15 @@ function vInsights() {
   // Tokens
   h += `<div class="sec">Token usage</div><div class="card"><div class="bd">`;
   const withTok = ps.filter(p => p.tokens.calls);
-  h += tok.n ? `<div class="sub mb">${tok.n} metered calls · ${tok.i.toLocaleString()} in / ${tok.o.toLocaleString()} out · est. <b>$${tok.c.toFixed(2)}</b> at list prices (override in <code>~/.config/researchforge/dashboard.json</code> → <code>token_prices</code>)</div>` :
+  h += tok.n ? `<div class="sub mb">${tok.n} metered calls · <b>${tok.i.toLocaleString()}</b> input tokens (what the model read, ${tok.r.toLocaleString()} of them from cache) · <b>${tok.o.toLocaleString()}</b> output tokens (what it wrote) · <b>$${tok.c.toFixed(2)}</b>${tok.rc ? ` ($${tok.rc.toFixed(2)} as reported by Claude Code, the API-equivalent price; on a subscription it counts toward your plan's limits rather than being billed)` : ""}${tok.c - tok.rc > 0.005 ? `, the rest estimated at list prices (override in <code>~/.config/researchforge/dashboard.json</code> → <code>token_prices</code>)` : ""}</div>` :
     `<div class="sub mb">No metered model calls recorded yet. Direct API calls are logged to <code>.overnight_&lt;slug&gt;/token_usage.jsonl</code> and the project DB's <code>ai_calls</code> table.</div>`;
-  if (withTok.length) h += `<div class="tbl"><table><thead><tr><th>Project</th><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>By purpose</th></tr></thead><tbody>${withTok.flatMap(p => Object.entries(p.tokens.by_model).map(([m, v]) =>
-    `<tr><td>${esc(p.name)}</td><td class="mono">${esc(m)}</td><td>${v.calls}</td><td>${v.input.toLocaleString()}</td><td>${v.output.toLocaleString()}</td><td class="sub">${Object.entries(p.tokens.by_purpose).map(([k, n]) => `${esc(k)}: ${n.toLocaleString()}`).join(" · ")}</td></tr>`)).join("")}</tbody></table></div>`;
+  if (withTok.length) h += `<div class="tbl"><table><thead><tr><th>Project</th><th>Model</th><th>Calls</th><th title="Prompt tokens the model read, cached ones included">Input</th><th title="Input tokens served from the prompt cache (cheaper)">of which cached</th><th title="Tokens the model wrote">Output</th><th>Cost</th><th>Tokens by purpose</th></tr></thead><tbody>${withTok.flatMap(p => Object.entries(p.tokens.by_model).map(([m, v]) =>
+    `<tr><td>${esc(p.name)}</td><td class="mono">${esc(m)}</td><td>${v.calls}</td><td>${v.input.toLocaleString()}</td><td class="dim">${(v.cache_read || 0).toLocaleString()}</td><td>${v.output.toLocaleString()}</td><td class="mono">${v.cost_usd ? "$" + v.cost_usd.toFixed(2) : "—"}</td><td class="sub">${Object.entries(p.tokens.by_purpose).map(([k, n]) => `${esc(k)}: ${n.toLocaleString()}`).join(" · ")}</td></tr>`)).join("")}</tbody></table></div>`;
   const perRound = withTok.filter(p => Object.keys(p.tokens.by_round || {}).length);
   if (perRound.length) h += `<div class="sec">Proposal tokens per round</div><div class="tbl"><table><thead><tr><th>Project</th><th>Rounds</th></tr></thead><tbody>${perRound.map(p =>
     `<tr><td>${esc(p.name)}</td><td class="sub">${Object.entries(p.tokens.by_round).map(([r, n]) => `<a href="${hashOf({ view: "dag", p: p.id, n: r })}">${esc(r)}</a>: ${n.toLocaleString()}`).join(" · ")}</td></tr>`).join("")}</tbody></table></div>`;
   const unobs = ps.filter(p => p.tokens.unobservable);
-  if (unobs.length) h += issues([{ level: "info", message: `${unobs.map(p => p.name).join(", ")}: proposals run in claude_code mode`, hint: unobs[0].tokens.note }]);
+  if (unobs.length) h += issues([{ level: "info", message: `${unobs.map(p => p.name).join(", ")}: rounds you run from your own Claude Code chat are not metered`, hint: unobs[0].tokens.note }]);
   h += `</div></div>`;
   return h;
 }

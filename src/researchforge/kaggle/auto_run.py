@@ -51,6 +51,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -424,11 +425,83 @@ def api_provider() -> Any:
             return None
 
 
+def _claude_json(stdout: str) -> dict[str, Any] | None:
+    """Claude Code's ``--output-format json`` reply, or None if it printed something else."""
+    try:
+        out = json.loads(stdout)
+    except ValueError:
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def claude_usage(out: dict[str, Any]) -> list[tuple[str, Any]]:
+    """(model, Usage) per model from a Claude Code JSON reply, cached prompt tokens included.
+
+    ``modelUsage`` covers the whole session (every turn, every model a launch used);
+    the top-level ``usage`` is the fallback for replies without it.
+    """
+    from researchforge.ai.usage import Usage
+
+    def n(v: Any) -> int:
+        return int(v) if isinstance(v, (int, float)) and v > 0 else 0
+
+    rows: list[tuple[str, Any]] = []
+    for model, m in (out.get("modelUsage") or {}).items():
+        if not isinstance(m, dict):
+            continue
+        read, write = n(m.get("cacheReadInputTokens")), n(m.get("cacheCreationInputTokens"))
+        cost = m.get("costUSD")
+        rows.append(
+            (
+                str(model),
+                Usage(
+                    input_tokens=n(m.get("inputTokens")) + read + write,
+                    output_tokens=n(m.get("outputTokens")),
+                    cache_read_tokens=read,
+                    cache_write_tokens=write,
+                    cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
+                ),
+            )
+        )
+    if rows:
+        return rows
+    u = out.get("usage") or {}
+    if not isinstance(u, dict) or not u:
+        return []
+    read, write = n(u.get("cache_read_input_tokens")), n(u.get("cache_creation_input_tokens"))
+    cost = out.get("total_cost_usd")
+    return [
+        (
+            "",
+            Usage(
+                input_tokens=n(u.get("input_tokens")) + read + write,
+                output_tokens=n(u.get("output_tokens")),
+                cache_read_tokens=read,
+                cache_write_tokens=write,
+                cost_usd=float(cost) if isinstance(cost, (int, float)) else None,
+            ),
+        )
+    ]
+
+
+def _sum_usage(usages: list[Any]) -> Any:
+    from researchforge.ai.usage import Usage
+
+    costs = [u.cost_usd for u in usages if u.cost_usd is not None]
+    return Usage(
+        input_tokens=sum(u.input_tokens for u in usages),
+        output_tokens=sum(u.output_tokens for u in usages),
+        cache_read_tokens=sum(u.cache_read_tokens for u in usages),
+        cache_write_tokens=sum(u.cache_write_tokens for u in usages),
+        cost_usd=sum(costs) if costs else None,
+    )
+
+
 class AgentCLIProvider:
     """One-shot text generation through a coding agent's CLI, with every tool off.
 
     Lets sensors use the project's Claude Code or Cursor driver instead of an API
-    key. Claude Code reports token usage in its JSON output, so these calls are
+    key. Claude Code reports tokens and cost in its JSON output, so these calls are
     metered like API calls; Cursor's are recorded with zero tokens.
     """
 
@@ -441,13 +514,15 @@ class AgentCLIProvider:
 
     def generate(self, system: str, user: str, *, max_tokens: int = 8192) -> str:
         from researchforge.ai.providers import _metered
-        from researchforge.ai.usage import Usage
 
+        prompt_in: str | None = None
         if self.driver == "claude":
+            # The prompt goes on stdin: as an argument, one starting with "-" (a list of
+            # notebook titles) is read as an option and the call fails before it starts.
+            prompt_in = user
             cmd = [
                 self.binary,
                 "-p",
-                user,
                 "--system-prompt",
                 system,
                 "--tools",
@@ -470,24 +545,22 @@ class AgentCLIProvider:
                 text=True,
                 timeout=self.timeout,
                 env=env,
-                stdin=subprocess.DEVNULL,
+                input=prompt_in,
+                stdin=None if prompt_in is not None else subprocess.DEVNULL,
                 check=False,
             )
+            out = _claude_json(proc.stdout) if self.driver == "claude" else None
+            if out is not None:
+                rows = claude_usage(out)
+                if rows:
+                    meter.model = max(rows, key=lambda r: r[1].cost_usd or 0.0)[0]
+                    meter.usage = _sum_usage([u for _, u in rows])
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"{self.driver} exited {proc.returncode}: {(proc.stderr or proc.stdout)[-300:]}"
                 )
-            if self.driver != "claude":
+            if out is None:
                 return proc.stdout.strip()
-            try:
-                out = json.loads(proc.stdout)
-            except ValueError:
-                return proc.stdout.strip()
-            usage = out.get("usage") or {}
-            meter.usage = Usage(
-                input_tokens=int(usage.get("input_tokens") or 0),
-                output_tokens=int(usage.get("output_tokens") or 0),
-            )
             if out.get("is_error"):
                 raise RuntimeError(f"claude: {str(out.get('result'))[:300]}")
             return str(out.get("result") or "")
@@ -730,7 +803,7 @@ def build_command(artifacts_dir: Path, slug: str, cfg: AutoRunConfig) -> list[st
             "Bash(researchforge experiment approve:*)",  # approvals are the person's
             "Bash(researchforge kaggle respond:*)",  # so are answers (a yes submits)
             "--output-format",
-            "text",
+            "json",  # run_child writes the reply's text to the log and meters its tokens
         ]
         return cmd + (["--model", cfg.model] if cfg.model else [])
     if cfg.driver == "cursor":
@@ -959,6 +1032,32 @@ def usage_limited_until(artifacts_dir: Path) -> tuple[datetime, str] | None:
     return until, str(hit.get("driver") or "")
 
 
+def _record_launch_reply(
+    artifacts_dir: Path, reply: str, outcome: dict[str, Any], seconds: float
+) -> None:
+    """Write a Claude launch's reply text to the log and its tokens to token_usage.jsonl."""
+    from researchforge.kaggle.token_log import log_usage
+
+    out = _claude_json(reply)
+    print(str(out.get("result") or "") if out is not None else reply.rstrip(), flush=True)
+    if out is None:
+        return
+    rows = claude_usage(out)
+    for i, (model, usage) in enumerate(rows):
+        log_usage(
+            artifacts_dir,
+            purpose="auto_run",
+            provider="claude-cli",
+            model=model or "default",
+            usage=usage,
+            duration_seconds=seconds if i == 0 else 0.0,  # one launch, timed once
+            rounds=outcome.get("rounds_run", 0),
+        )
+    cost = _sum_usage([u for _, u in rows]).cost_usd if rows else None
+    if cost is not None:
+        outcome["cost_usd"] = round(cost, 4)
+
+
 def run_child(artifacts_dir: Path, slug: str) -> int:
     """Run one launch in the foreground with its time limit. Entry point of the child."""
     cfg = AutoRunConfig.load(artifacts_dir)
@@ -972,12 +1071,17 @@ def run_child(artifacts_dir: Path, slug: str) -> int:
         flush=True,
     )
     outcome: dict[str, Any] = {}
+    started = time.monotonic()
+    reply = ""
     try:
         proc = subprocess.Popen(
             cmd,
             cwd=str(artifacts_dir.parent),
             env=child_env(artifacts_dir, cfg.driver),
             stdin=subprocess.DEVNULL,
+            # Claude's JSON reply is read here, not streamed into the log; the rest
+            # inherit this process's stdout, which is the log.
+            stdout=subprocess.PIPE if cfg.driver == "claude" else None,
             start_new_session=True,
         )
     except OSError as exc:
@@ -986,7 +1090,9 @@ def run_child(artifacts_dir: Path, slug: str) -> int:
     if proc is not None:
         signal.signal(signal.SIGTERM, _on_sigterm)
         try:
-            code = proc.wait(timeout=cfg.max_minutes * 60)
+            out, _ = proc.communicate(timeout=cfg.max_minutes * 60)
+            reply = out.decode("utf-8", "replace") if out else ""
+            code = proc.returncode
             outcome = {"status": "finished" if code == 0 else "failed", "exit_code": code}
             if code != 0:
                 outcome["error"] = f"{cfg.driver} exited with code {code}; see {LOG_FILE}"
@@ -999,6 +1105,8 @@ def run_child(artifacts_dir: Path, slug: str) -> int:
             outcome = {"status": "stopped", "error": "stopped on request"}
     outcome["rounds_run"] = max(0, rounds_total(artifacts_dir) - before)
     outcome["finished_at"] = datetime.now().isoformat(timespec="seconds")
+    if reply:
+        _record_launch_reply(artifacts_dir, reply, outcome, time.monotonic() - started)
     # A usage limit is not a crash: say so, and wait for the reset instead of retrying.
     try:
         with log_path.open("rb") as fh:
