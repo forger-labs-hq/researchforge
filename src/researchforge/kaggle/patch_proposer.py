@@ -253,6 +253,7 @@ class PatchProposer:
             f"=== COMPETITION ===\n{meta_section}\n"
             f"=== BASELINE ===\n{baseline_section}\n"
             f"=== UP NEXT (the person's queue) ===\n{self._up_next_section()}\n"
+            f"=== KAGGLE LEADERBOARD (our submissions) ===\n{self._leaderboard_section()}\n"
             f"=== HYPOTHESIS POOL (untested, ranked) ===\n{pool_section}\n"
             f"=== IDEAS FROM SOURCES ===\n{ideas_section}\n"
             f"=== USER CONTEXT ===\n{answers_section}\n"
@@ -267,6 +268,26 @@ class PatchProposer:
         if not lines:
             return "Nothing queued: follow the hypothesis pool.\n"
         return "\n".join(f"  {line}" for line in lines) + f"\n  {FOLLOW_RULE}\n"
+
+    def _leaderboard_section(self) -> str:
+        """Local metric vs public LB for our submitted rounds (submission.leaderboard_table)."""
+        from researchforge.kaggle.submission import LEADERBOARD_NOTE, leaderboard_table
+
+        rows = leaderboard_table(self.setup.artifacts_dir)
+        if not rows:
+            return "Nothing submitted yet: the local metric is the only signal.\n"
+
+        def num(v: Any) -> str:
+            return f"{v:.5g}" if isinstance(v, (int, float)) else "—"
+
+        lines = [
+            f"  R{r['round']}: local {num(r['local'])} -> LB "
+            + (num(r["lb"]) if r["lb"] is not None else str(r["lb_status"]).replace("_", " "))
+            + (f" ({r['lb_error'][:160]})" if r.get("lb_error") else "")
+            + (f" — {r['title']}" if r["title"] else "")
+            for r in rows
+        ]
+        return "\n".join(lines) + f"\n  {LEADERBOARD_NOTE}\n"
 
     def _pool_section(self, limit: int = 10) -> str:
         """The live pool (watcher, arXiv, resynthesize, user) in the shared order."""

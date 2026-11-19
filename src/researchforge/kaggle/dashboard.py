@@ -408,7 +408,7 @@ class DashboardService:
         )
 
     def action_round(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        """Archive, restore or delete one round of the overnight loop."""
+        """Archive, restore, delete or submit one round of the overnight loop."""
         from researchforge.kaggle.experiment_loop import delete_round, set_archived
 
         art = Path(project["overnight"]["artifacts_dir"])
@@ -417,13 +417,20 @@ class DashboardService:
         except ValueError:
             raise ValueError("round must be a round number, e.g. 7 or R7") from None
         op = str(body.get("op") or "archive")
+        if op == "submit":
+            from researchforge.kaggle.submission import submit_now
+
+            line = submit_now(
+                art, str(project.get("slug") or ""), num, str(body.get("comment") or "")
+            )
+            return {"round": num, "op": op, "output": line}
         if op == "delete":
             if not delete_round(art, num):
                 raise KeyError(f"no round {num}")
         elif op in ("archive", "restore"):
             set_archived(art, num, op == "archive", str(body.get("reason") or "dashboard"))
         else:
-            raise ValueError("op must be archive, restore or delete")
+            raise ValueError("op must be archive, restore, delete or submit")
         return {"round": num, "op": op}
 
     _colab_signin: Any = None

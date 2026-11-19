@@ -37,20 +37,14 @@ def load_board(artifacts_dir: Path) -> dict[str, Any]:
 
 
 def _rounds_lb(artifacts_dir: Path) -> dict[int, float]:
-    """Public LB score of each submitted round ("RF R21: …" in the description)."""
-    snap = read_json(artifacts_dir / "submissions.json", {}) or {}
-    out: dict[int, float] = {}
-    for s in snap.get("submissions", []) if isinstance(snap, dict) else []:
-        if not isinstance(s, dict):
-            continue
-        m = _ROUND_IN_DESCRIPTION.search(str(s.get("description") or ""))
-        try:
-            score = float(str(s.get("publicscore", s.get("publicScore"))))
-        except (TypeError, ValueError):
-            continue
-        if m:
-            out.setdefault(int(m.group(1)), score)
-    return out
+    """Public LB score of each submitted round (see submission.leaderboard_by_round)."""
+    from researchforge.kaggle.submission import leaderboard_by_round
+
+    return {
+        n: float(v["public"])
+        for n, v in leaderboard_by_round(artifacts_dir).items()
+        if v.get("public") is not None
+    }
 
 
 def _tried(artifacts_dir: Path, refs: set[str]) -> dict[str, list[dict[str, Any]]]:

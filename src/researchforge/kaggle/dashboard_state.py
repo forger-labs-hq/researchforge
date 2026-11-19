@@ -736,10 +736,21 @@ def _read_overnight(d: Path, slug: str, sibling_setups: list[str]) -> dict[str, 
     from researchforge.kaggle.auto_run import round_drivers
 
     drivers = round_drivers(d)
+    from researchforge.kaggle.submission import (
+        leaderboard_by_round,
+        submittable,
+        submitted_rounds,
+    )
+
+    sent, lb = submitted_rounds(d), leaderboard_by_round(d)
     for e in experiments:
         ran = drivers.get(str(e["num"]), {})
         e["driver"] = ran.get("driver", "")
         e["auto_run"] = bool(ran.get("auto_run"))
+        # Whether the Submit button can send it, and whether it already went.
+        e["submittable"] = submittable(d, int(e["num"]))
+        e["submitted"] = int(e["num"]) in sent or int(e["num"]) in lb
+        e["lb"] = lb.get(int(e["num"]))  # what Kaggle scored it, if it was submitted
     # Archived rounds leave every view, the DAG and "best"; Runs lists them apart.
     from researchforge.kaggle.experiment_loop import archived_rounds
 
@@ -1369,6 +1380,7 @@ def _submissions(slug: str, snapshot: Any, live: dict[str, Any] | None) -> dict[
                 "status": (s.get("status") or "").replace("SubmissionStatus.", "").lower(),
                 "public": s.get("publicscore") or s.get("public_score") or "",
                 "private": s.get("privatescore") or s.get("private_score") or "",
+                "error": s.get("errordescription") or s.get("error_description") or "",
             }
         )
     return {
@@ -1690,10 +1702,17 @@ def _questions(
 
     Open questions from the overnight loop and the repo project (answerable from the
     dashboard), plus repo plans waiting for approval — those stay typed in a terminal,
-    so they carry the command instead of answer buttons.
+    so they carry the command instead of answer buttons. Submission offers for rounds
+    that followed the person's direction or pinned idea come first and say so.
     """
     from researchforge.kaggle.control import open_interactions
+    from researchforge.kaggle.submission import round_of
 
+    followed = {
+        int(e.get("num") or 0): [g for g in e.get("steered") or [] if g.get("how") == "followed"]
+        for e in experiments
+        if e.get("source") != "repo"
+    }
     out: list[dict[str, Any]] = []
     for where, d in (("kaggle", od), ("repo", repo_dir)):
         if d is None:
@@ -1709,6 +1728,11 @@ def _questions(
                 cmd = f"researchforge experiment judge {q.answer_key[6:]} <yes|no|skip>"
             else:
                 cmd = "answer it on the dashboard"
+            num = (
+                round_of(q.answer_key, q.question)
+                if where == "kaggle" and q.kind == "submission_approval"
+                else None
+            )
             out.append(
                 {
                     "id": q.id,
@@ -1724,6 +1748,8 @@ def _questions(
                     "asked_at": _norm_ts(q.created_at),
                     "answerable": True,
                     "command": cmd,
+                    "round": num,
+                    "steered": followed.get(num, []) if num is not None else [],
                 }
             )
     plans: dict[str, list[str]] = {}
@@ -1755,6 +1781,7 @@ def _questions(
             }
         )
     out.sort(key=lambda q: q["asked_at"] or "", reverse=True)
+    out.sort(key=lambda q: not q.get("steered"))  # stable: steered first, each part newest first
     return out
 
 

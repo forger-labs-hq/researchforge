@@ -462,3 +462,157 @@ def test_a_refusal_is_recorded_with_its_round(
         submission.answer(d, SLUG, qid, "yes")
     (row,) = (d / submission.REFUSED_FILE).read_text().splitlines()
     assert json.loads(row)["round"] == 7 and "400" in json.loads(row)["reply"]
+
+
+def test_a_steered_round_is_offered_even_when_it_did_not_beat_the_best(
+    tmp_path: Path,
+) -> None:
+    from researchforge.kaggle import steering
+
+    d = _project(tmp_path)
+    # maximize: R2 is best (0.6); R3 followed the person's direction and scored 0.4;
+    # R4 also followed it but failed.
+    _log(d, [(1, 0.4, 1, 1), (2, 0.6, 1, 1), (3, 0.4, 1, 0), (4, None, 0, 0)], minimize=False)
+    rl = steering.add(d, "try RL")
+    steering.record_round(d, 3, {"follows": [rl.id]})
+    steering.record_round(d, 4, {"follows": [rl.id]})
+    for n in (2, 3, 4):
+        f = tmp_path / f"r{n}.csv"
+        f.write_text("id,y\n")
+        submission.record_round_outputs(d, n, {"submission_file": str(f)})
+    submission.offer_missed(d)
+    offers = {
+        submission.round_of(q.answer_key, q.question): q.question
+        for q in control.open_interactions(d)
+    }
+    assert set(offers) == {2, 3}  # the best, and the steered round; never the failed one
+    assert "followed your direction; did not beat the best: 0.4000 vs 0.6000 (R2)" in offers[3]
+    for q in control.open_interactions(d):
+        submission.answer(d, SLUG, q.id, "no")
+    assert submission.offer_missed(d) is None  # asked once, even after "no"
+
+
+def test_submit_now_sends_a_round_nobody_offered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path)
+    _log(d, [(1, 0.4, 1, 1), (2, 0.3, 1, 0)], minimize=False)
+    calls = _fake_kaggle(monkeypatch, "Successfully submitted to comp")
+    with pytest.raises(ValueError, match="nothing Kaggle takes"):
+        submission.submit_now(d, SLUG, 2)
+    f = tmp_path / "r2.csv"
+    f.write_text("id,y\n")
+    submission.record_round_outputs(d, 2, {"submission_file": str(f)})
+    assert submission.submit_now(d, SLUG, 2).startswith("R2 submitted to Kaggle")
+    assert calls[0][-1] == "RF R2: idea 2" and submission.submitted_rounds(d) == {2}
+    (item,) = control.load_interactions(d)
+    assert (item.source, item.answer) == ("you", "yes")
+
+
+def test_the_submission_message_uses_the_rounds_title_not_the_offers_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    d = _project(tmp_path)
+    _log(d, [(1, 0.4, 1, 1)], minimize=False)
+    f = tmp_path / "r1.csv"
+    f.write_text("id,y\n")
+    submission.record_round_outputs(d, 1, {"submission_file": str(f)})
+    calls = _fake_kaggle(monkeypatch, "Successfully submitted to comp")
+    item = control.ask_submission(d, 1, "Submit R1 'idea 1' (it's 0.4; can't tell) to Kaggle?")
+    submission.answer(d, SLUG, item.id, "yes")
+    assert calls[0][-1] == "RF R1: idea 1"
+
+
+def test_a_pending_round_whose_notebook_is_gone_is_closed_once_it_is_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    from researchforge.kaggle import api, late_rounds
+
+    d = _project(tmp_path)
+    (d / "overnight_setup.json").write_text(
+        json.dumps({"competition_slug": SLUG, "artifacts_dir": str(d), "data_dir": str(d)})
+    )
+    _log(d, [(1, 0.8, 1, 1), (2, None, 0, 0)], minimize=False)
+    submission.record_round_outputs(d, 2, {"kernel_ref": "me/rf-r2", "pending": True})
+    monkeypatch.setattr(api, "get_kernel_run_status", lambda ref: ("missing", "404"))
+    assert late_rounds.collect(d) == []  # just pushed, Kaggle may not list it yet
+    with sqlite3.connect(d / "experiment_log.db") as conn:
+        conn.execute("UPDATE experiments SET started_at = '2026-01-01T00:00:00'")
+    (line,) = late_rounds.collect(d)
+    assert "no longer has the notebook me/rf-r2" in line
+    assert late_rounds.pending_rounds(d) == {}
+    assert control.open_interactions(d) == []  # nothing to offer
+
+
+def test_kaggle_scores_are_matched_to_their_rounds(tmp_path: Path) -> None:
+    d = _project(tmp_path)
+    _log(d, [(14, 0.4, 1, 1), (24, 0.4, 1, 0), (25, 0.3, 1, 0), (37, 0.4, 1, 0)], minimize=False)
+
+    def sub(desc: str, date: str, status: str, public: str = "", **kw: str) -> dict[str, str]:
+        return {"description": desc, "date": date, "status": status, "publicscore": public, **kw}
+
+    snap = {
+        "submissions": [
+            sub("RF R37: GRPO", "2026-11-19", "SubmissionStatus.PENDING"),
+            sub("RF R25: v4 config", "2026-11-17", "SubmissionStatus.COMPLETE", "0.13"),
+            sub("RF R24: bundle", "2026-11-16", "SubmissionStatus.COMPLETE"),
+            sub(
+                "RF R26: bundle",
+                "2026-11-18",
+                "SubmissionStatus.COMPLETE",
+                errordescription="Your submission notebook exceeded the allowed runtime.",
+            ),
+            sub("CONTROL: resubmit of round_14", "2026-11-01", "SubmissionStatus.COMPLETE", "0.17"),
+            sub("RF R14 again", "2026-11-20", "SubmissionStatus.PENDING"),
+            sub("RF R9: x", "2026-11-02", "SubmissionStatus.ERROR", errorDescription="timeout"),
+            sub("hand-made", "2026-11-03", "SubmissionStatus.COMPLETE", "0.9"),
+        ]
+    }
+    (d / "submissions.json").write_text(json.dumps(snap))
+    lb = submission.leaderboard_by_round(d)
+    assert set(lb) == {9, 14, 24, 25, 26, 37}  # "hand-made" names no round
+    # Kaggle lists a notebook that ran out of time as complete; its error text says so.
+    assert (lb[26]["status"], lb[26]["error"]) == (
+        "error",
+        "Your submission notebook exceeded the allowed runtime.",
+    )
+    assert (lb[25]["public"], lb[25]["status"]) == (0.13, "scored")
+    assert lb[24]["status"] == "no_score" and lb[37]["status"] == "pending"
+    assert (lb[9]["status"], lb[9]["error"]) == ("error", "timeout")
+    # R14's newer submission is still scoring: the score it already has stays.
+    assert (lb[14]["public"], lb[14]["submissions"], lb[14]["latest"]) == (0.17, 2, "pending")
+    table = submission.leaderboard_table(d)
+    assert [r["round"] for r in table] == [37, 26, 25, 24, 14, 9]
+    assert table[2] == {
+        "round": 25,
+        "title": "idea 25",
+        "local": 0.3,
+        "lb": 0.13,
+        "lb_status": "scored",
+    }
+
+    from researchforge.kaggle.patch_proposer import PatchProposer
+
+    proposer = PatchProposer.__new__(PatchProposer)
+    proposer.setup = SimpleNamespace(artifacts_dir=d)
+    text = proposer._leaderboard_section()
+    assert "R25: local 0.3 -> LB 0.13 — idea 25" in text and "R24: local 0.4 -> LB no score" in text
+    assert "R26: local — -> LB error (Your submission notebook exceeded" in text
+
+
+def test_the_submission_listing_carries_kaggles_reason_for_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    from researchforge.kaggle import kernel_watcher
+
+    csv_out = "ref,fileName,date,description,status,publicScore\n7,s.zip,2026,RF R26: x,COMPLETE,\n"
+    reply = SimpleNamespace(returncode=0, stdout=csv_out, stderr="")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: reply)
+    errors = {"7": "exceeded the allowed runtime"}
+    monkeypatch.setattr(kernel_watcher, "submission_errors", lambda slug: errors)
+    rows, err = kernel_watcher.fetch_submissions(SLUG)
+    assert err == "" and rows[0]["errordescription"] == "exceeded the allowed runtime"

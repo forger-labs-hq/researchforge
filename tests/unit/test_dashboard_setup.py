@@ -412,6 +412,27 @@ class TestUpNext:
         steering._save(d, [*steering.load(d), old])
         assert steering.steered_rounds(d)[2][0]["id"] == "d-old"
 
+    def test_offers_for_steered_rounds_come_first_in_the_bell(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from researchforge.kaggle import control, dashboard_state
+
+        d = _overnight(tmp_path)
+        monkeypatch.setattr(control, "notify", lambda *a, **k: True)
+        rl = steering.add(d, "try RL")
+        steering.record_round(d, 3, {"follows": [rl.id]})
+        control.ask_submission(d, 3, "Submit R3 (RL) to Kaggle?", require_output=False)
+        for n in (4, 5):
+            control.ask_submission(d, n, f"Submit R{n} to Kaggle?", require_output=False)
+        # The agent offering a round the engine already offered gets the same question back.
+        again = control.ask_submission(d, 5, "Submit R5 (agent)?", require_output=False)
+        assert again.question == "Submit R5 to Kaggle?"
+        steered = steering.steered_rounds(d)
+        exps = [{"num": n, "source": "kaggle", "steered": steered.get(n, [])} for n in (3, 4, 5)]
+        qs = dashboard_state._questions(d, None, exps, SLUG)
+        assert [q["round"] for q in qs][0] == 3  # the oldest offer, but it followed your steer
+        assert qs[0]["steered"][0]["text"] == "try RL" and not qs[1]["steered"]
+
     def test_execute_round_refuses_a_proposal_that_ignores_the_head(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

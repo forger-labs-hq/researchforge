@@ -819,7 +819,9 @@ function questionCard(p, q, pre = "qa") {
   const meta = [q.source && `asked by ${esc(q.source)}`, q.asked_at && when(q.asked_at), q.holds_loop && q.kind !== "plan_approval" ? '<span style="color:var(--amber)">loop on hold</span>' : "",
     q.blocks && q.blocks.length && q.kind !== "plan_approval" ? `${plural(q.blocks.length, "idea")} waiting` : ""].filter(Boolean).join(" · ");
   const x = q.answerable ? `<button class="right" style="padding:0 7px" data-act="q-dismiss" data-id="${p.id}" data-where="${q.where}" data-q="${esc(q.id)}" ${busy ? "disabled" : ""} title="Dismiss: close it without answering; the ideas it blocked run again" aria-label="Dismiss question">✕</button>` : "";
-  let h = `<div class="qcard"><div class="sub flex">${isNewQ(q) ? '<span class="new" title="new"></span>' : ""}<span><b>${esc(p.name)}</b>${meta ? " · " + meta : ""}</span>${x}</div><div class="q">${esc(q.question)}</div>`;
+  const steered = (q.steered || []).length;
+  let h = `<div class="qcard"${steered ? ` style="border-left:3px solid ${STEER_COLOR}"` : ""}><div class="sub flex">${isNewQ(q) ? '<span class="new" title="new"></span>' : ""}<span><b>${esc(p.name)}</b>${meta ? " · " + meta : ""}</span>${steerTag(q.steered)}${x}</div><div class="q">${esc(q.question)}</div>`;
+  if (steered) h += `<div class="sub" style="color:${STEER_COLOR};margin:2px 0">${esc(steerWhy(q.steered)).replace(/\n/g, "<br>")}</div>`;
   if (q.kind === "submission_approval") h += dailyNote(p);
   const ck = "c:" + k, comment = `<input type="text" id="${pre}-c-${esc(k)}" data-ans="${esc(ck)}" value="${esc(S.ans[ck] || "")}" placeholder="Add a comment (optional) — the next proposal reads it" style="width:100%;margin:4px 0" aria-label="Comment">`;
   if (q.approvable) {
@@ -853,8 +855,8 @@ function questionsHtml(items, empty, pre = "qa") {
 function questionGroup(g, pre, only) {
   const p = g[0].p, key = `${pre}:${p.id}`, open = only || S.qOpen.has(key);
   const offers = g.filter(x => x.q.kind === "submission_approval").length, others = g.length - offers;
-  const fresh = g.some(x => isNewQ(x.q)), left = offers ? dailyLeft(p) : "";
-  const bits = [others && plural(others, "question"), offers && plural(offers, "submission offer"), left].filter(Boolean).join(" · ");
+  const fresh = g.some(x => isNewQ(x.q)), left = offers ? dailyLeft(p) : "", steered = g.filter(x => (x.q.steered || []).length).length;
+  const bits = [steered && `🧭 ${steered} steered by you (on top)`, others && plural(others, "question"), offers && plural(offers, "submission offer"), left].filter(Boolean).join(" · ");
   const head = only ? "" : `<button class="qhead" data-act="q-group" data-key="${esc(key)}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span>${fresh ? '<span class="new" title="new"></span>' : ""}<b>${esc(p.name)}</b><span class="sub">${esc(bits)}</span></button>`;
   return head + (open ? g.map(({ q }) => questionCard(p, q, pre)).join("") : "");
 }
@@ -1136,6 +1138,25 @@ function steerTag(list) {
   return `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR};background:#422006" title="${esc(steerWhy(followed))}">🧭 steered</span>`;
 }
 const isSteered = e => (e.steered || []).some(g => g.how === "followed");
+// Submit any finished round that left something Kaggle takes, steered or not.
+// Kaggle's public score for a submitted round, beside the local metric.
+function lbCell(e) {
+  const l = e.lb;
+  if (!l) return '<span class="dim">—</span>';
+  const n = l.submissions > 1 ? ` <span class="dim">×${l.submissions}</span>` : "";
+  if (l.public != null) return `<span title="Public leaderboard score on Kaggle${l.date ? " (" + esc(l.date.slice(0, 16)) + ")" : ""}">${fmtM(l.public)}</span>${n}`;
+  const what = l.status === "error" ? subFail(l.error) : { pending: "scoring…", no_score: "no score" }[l.status] || l.status;
+  const why = { pending: "Kaggle is still scoring it", no_score: "Kaggle finished it without a public score (for a notebook competition this usually means the run failed or timed out on Kaggle)", error: l.error || "Kaggle reported an error" }[l.status] || "";
+  return `<span class="${l.status === "error" ? "" : "dim"}" style="${l.status === "error" ? "color:var(--red)" : ""}" title="${esc(why)}">${esc(what)}</span>${n}`;
+}
+// Kaggle's failure text in two words ("Your submission notebook exceeded the allowed runtime…").
+function subFail(err) { return /exceeded the allowed runtime|timed? ?out/i.test(err || "") ? "timed out" : "failed"; }
+function submitBtn(p, e) {
+  if (e.source !== "overnight" || e.status === "running") return "";
+  if (e.submitted) return `<span class="badge" title="Sent to Kaggle; Submissions shows its score">submitted ✓</span>`;
+  if (!e.submittable) return "";
+  return `<button data-act="round" data-op="submit" data-id="${p.id}" data-round="${e.num}" title="Send R${e.num} to Kaggle now. It uses one of today's submissions.">Submit</button>`;
+}
 function vRuns() {
   const rows = [];
   projects().forEach(p => p.experiments.forEach(e => rows.push({ p, e })));
@@ -1146,12 +1167,12 @@ function vRuns() {
   const multi = projects().length > 1, nSteered = rows.filter(({ e }) => isSteered(e)).length;
   const queues = projects().filter(p => p.overnight && p.overnight.has_setup && p.role === "primary").slice(0, 3).map(queueCard).join("");
   return queues + `<div class="chips">${[["all", `All runs (${rows.length})`], ["steered", `🧭 Steered by you (${nSteered})`]].map(([k, l]) => `<span class="chip${(S.chips.runsteer || "all") === k ? " on" : ""}" data-act="chip" data-group="runsteer" data-val="${k}">${l}</span>`).join("")}</div>
-    <div class="card"><div class="tbl"><table><thead><tr>${multi ? "<th>Project</th>" : ""}<th>Run</th><th>Title</th><th>Status</th><th>Stage</th><th>Metric</th><th>Δ baseline</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
+    <div class="card"><div class="tbl"><table><thead><tr>${multi ? "<th>Project</th>" : ""}<th>Run</th><th>Title</th><th>Status</th><th>Stage</th><th>Metric</th><th title="Public leaderboard score Kaggle gave the round when it was submitted">Kaggle LB</th><th>Δ baseline</th><th>Started</th><th>Duration</th><th></th></tr></thead><tbody>
     ${f.slice(0, 500).map(({ p, e }) => `<tr class="click" data-act="node" data-id="${p.id}" data-node="${esc(e.id)}"${isSteered(e) ? ` style="box-shadow:inset 3px 0 0 ${STEER_COLOR}"` : ""}>${multi ? `<td class="trunc" style="max-width:180px">${esc(p.name)}</td>` : ""}
       <td class="mono">${esc(e.id)}${p.best && p.best.id === e.id ? " ★" : ""}${e.driver ? `<div class="dim" style="font-size:11px" title="driver that ran this round">${esc(DRIVER_NAMES[e.driver] || e.driver)}${e.auto_run ? " · auto" : ""}</div>` : ""}</td><td class="trunc" title="${esc(e.title)}">${steerTag(e.steered)} ${esc(e.title)}${e.reason && e.status !== "improved" ? `<div class="dim trunc">${esc(e.reason)}</div>` : ""}</td>
-      <td>${badge(e.status)}</td><td class="sub">${esc(e.stage || "—")}</td><td class="mono">${fmtM(e.metric)}</td><td class="mono">${delta(e) || '<span class="dim">—</span>'}</td>
+      <td>${badge(e.status)}</td><td class="sub">${esc(e.stage || "—")}</td><td class="mono">${fmtM(e.metric)}</td><td class="mono">${lbCell(e)}</td><td class="mono">${delta(e) || '<span class="dim">—</span>'}</td>
       <td class="sub">${when(e.started_at)}</td><td class="sub">${dur(e.duration_s)}</td>
-      <td>${e.source === "overnight" && e.status !== "running" ? `<button data-act="round" data-op="archive" data-id="${p.id}" data-round="${e.num}" title="Hide it everywhere; never a parent or best. Reversible.">Archive</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
+      <td style="white-space:nowrap">${submitBtn(p, e)} ${e.source === "overnight" && e.status !== "running" ? `<button data-act="round" data-op="archive" data-id="${p.id}" data-round="${e.num}" title="Hide it everywhere; never a parent or best. Reversible.">Archive</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
     ${f.length > 500 ? `<div class="sub bd">Showing 500 of ${f.length}.</div>` : ""}${!f.length ? `<div class="empty">No run matches “${esc(S.route.q)}”.</div>` : ""}</div>${archivedRuns()}`;
 }
 function emptyFor(what) {
@@ -1266,6 +1287,9 @@ function nodeDetail(p, e) {
     <div>Completed</div><div>${esc(e.completed_at || "—")}</div>
     <div>Duration</div><div>${dur(e.duration_s)}</div>
     ${e.reason ? `<div>Decision</div><div>${esc(e.reason)}</div>` : ""}
+    ${e.lb ? `<div>Kaggle LB</div><div class="mono">${lbCell(e)} <span class="dim">(local ${fmtM(e.metric)})</span></div>` : ""}
+    ${e.lb && e.lb.error ? `<div>Kaggle said</div><div style="color:var(--red)">${esc(e.lb.error)}</div>` : ""}
+    ${submitBtn(p, e) ? `<div>Kaggle</div><div>${submitBtn(p, e)}</div>` : ""}
     ${e.executions && e.executions.length ? `<div>Executions</div><div>${e.executions.map(x => `${esc(x.stage)} ${badge(x.status === "succeeded" ? "ok" : x.status === "running" ? "running" : "error", x.status)} ${fmtM(x.metric)}`).join("<br>")}</div>` : ""}
     ${pr.description ? `<div>Change</div><div>${esc(pr.description)}</div>` : ""}
     ${pr.rationale ? `<div>Rationale</div><div>${esc(pr.rationale)}</div>` : ""}
@@ -1407,7 +1431,7 @@ function vSubs() {
     if (best.error) h += `<div class="bd">${issues([{ level: "error", message: "Kaggle CLI: " + best.error, hint: best.items.length ? "showing the last good listing" : "" }])}</div>`;
     h += items.length ? `<div class="tbl"><table><thead><tr><th>Ref</th><th>File</th><th>Description</th><th>Date</th><th>Status</th><th>Public</th><th>Private</th></tr></thead><tbody>${items.map(s =>
       `<tr><td class="mono">${esc(s.ref)}</td><td class="trunc">${esc(s.file)}</td><td class="trunc sub" title="${esc(s.description)}">${esc(s.description)}</td><td class="sub" style="white-space:nowrap">${esc((s.date || "").replace("T", " ").slice(0, 16))}</td>
-       <td>${badge(s.status === "complete" ? "complete_sub" : s.status === "error" ? "error" : "pending", s.status)}</td><td class="mono" style="color:var(--green)">${esc(s.public || "—")}</td><td class="mono">${esc(s.private || "—")}</td></tr>`).join("")}</tbody></table></div>` :
+       <td>${s.error ? `${badge("error", subFail(s.error))}<div class="sub" style="color:var(--red);max-width:260px;white-space:normal">${esc(s.error)}</div>` : badge(s.status === "complete" ? "complete_sub" : s.status === "error" ? "error" : "pending", s.status)}</td><td class="mono" style="color:var(--green)">${esc(s.public || "—")}</td><td class="mono">${esc(s.private || "—")}</td></tr>`).join("")}</tbody></table></div>` :
       `<div class="empty">${best.status === "pending" ? "Fetching from Kaggle…" : best.status === "error" ? "No submissions could be listed." : "No submissions for this competition yet."}</div>`;
     h += `</details>`;
   }
@@ -1660,9 +1684,10 @@ document.addEventListener("click", e => {
     e.stopPropagation();
     const op = el.dataset.op, n = el.dataset.round;
     const ask = { archive: `Archive R${n} of ${p.name}?\n\nIt disappears from the views, is never used as a parent and never counts as best. You can restore it from Runs → Archived.`,
-      delete: `Delete R${n} of ${p.name} for good?\n\nThis removes it from the experiment log and cannot be undone.` }[op];
+      delete: `Delete R${n} of ${p.name} for good?\n\nThis removes it from the experiment log and cannot be undone.`,
+      submit: `Submit R${n} of ${p.name} to Kaggle now?\n\nIt uses one of today's submissions${dailyLeft(p) ? ` (${dailyLeft(p)})` : ""}. If Kaggle refuses, nothing is used and the offer stays in 🔔.` }[op];
     if (ask && !confirm(ask)) return;
-    act(`round:${id}:${n}`, () => api("/api/round", { project: id, round: n, op }), `R${n} ${{ archive: "archived", restore: "restored", delete: "deleted" }[op]}`);
+    act(`round:${id}:${n}`, () => api("/api/round", { project: id, round: n, op }), `R${n} ${{ archive: "archived", restore: "restored", delete: "deleted", submit: "submitted to Kaggle" }[op]}`);
   }
   else if (a === "drv-save" && p) {
     const driver = S.drv[id] || p.overnight.auto_run.config.driver;

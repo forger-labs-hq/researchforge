@@ -256,6 +256,7 @@ Read ALL fields carefully:
   user), ranked best-first. Notebook ideas carry `kernel_ref`, `claimed_score` and
   `claim_vs_our_best` (the gap to our best public-LB submission, `our_best_lb`). A claim is
   the author's word: a big gap is a strong lead worth pulling the notebook for, not a result.
+- `leaderboard` — our submitted rounds as Kaggle scored them: `local` metric vs public `lb` (or `lb_status`: pending, no_score, error, with Kaggle's reason in `lb_error`), newest first. Where they disagree, trust the LB and weigh new ideas by how similar rounds did there; say so in the rationale. A round Kaggle failed (e.g. "exceeded the allowed runtime" on the hidden test set) fails again unless the next round removes the cause: shorten the run, cut calls or tasks, add a time guard, and say how
 - `public_notebooks_ahead` — public notebooks claiming a better LB than our best submission
   (`gap`), best first, from the hourly notebook board (`kernel_board.json`; the dashboard's
   Hypotheses page shows all of it). `tried` lists our rounds that ran each one. When our local

@@ -574,7 +574,8 @@ def _submission_check(slug: str, artifacts_dir: Path) -> tuple[str, str]:
         ref, st = str(x.get("ref") or ""), str(x.get("status", "")).lower()
         if not ref:
             continue
-        event = "failed" if "error" in st else "scored" if "complete" in st else "listed"
+        failed = "error" in st or bool(x.get("errordescription"))  # a timeout is "complete"
+        event = "failed" if failed else "scored" if "complete" in st else "listed"
         if event == "scored" or ref in scored_now:  # announced through seen_submission_ids
             notices[ref] = "scored"
             continue
@@ -2523,6 +2524,9 @@ def prepare_round(
         "person_notes": _control.person_notes(artifacts_dir),
         # Where the round's code runs and what it may not do there (Colab only, …).
         "compute": _round_target.brief(artifacts_dir),
+        # What Kaggle made of our own submissions: local metric vs public LB.
+        "leaderboard": _submission.leaderboard_table(artifacts_dir),
+        "leaderboard_note": _submission.LEADERBOARD_NOTE,
         # Public notebooks claiming a better leaderboard score than our best submission.
         "public_notebooks_ahead": _kernel_board.ahead_of_us(artifacts_dir),
         "public_notebooks_note": (
@@ -3849,3 +3853,4 @@ from researchforge.kaggle import control_cli as _control_cli  # noqa: E402, F401
 from researchforge.kaggle import kernel_board as _kernel_board  # noqa: E402
 from researchforge.kaggle import keys_cli as _keys_cli  # noqa: E402, F401
 from researchforge.kaggle import round_target as _round_target  # noqa: E402
+from researchforge.kaggle import submission as _submission  # noqa: E402

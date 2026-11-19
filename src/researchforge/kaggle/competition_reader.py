@@ -450,27 +450,35 @@ for c in api.competitions_list(search=sys.argv[1], page=1).competitions or []:
 """
 
 
-def _competition_facts_via_cli(slug: str) -> dict[str, Any]:
-    """competition_facts through the Python the `kaggle` command runs on."""
+def run_on_kaggle_python(snippet: str, *args: str, timeout: int = 60) -> str:
+    """Run ``snippet`` on the Python the `kaggle` command runs on; its stdout, or "".
+
+    The Kaggle API package lives there, not necessarily beside ResearchForge.
+    """
     import shutil
 
     exe = shutil.which("kaggle")
     if not exe:
-        return {}
+        return ""
     try:
         first = Path(exe).read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
         python = first[2:].strip().split()[0] if first.startswith("#!") else ""
         if not python or not Path(python).is_file():
-            return {}
-        out = subprocess.run(
-            [python, "-I", "-c", _FACTS_SNIPPET, slug],
+            return ""
+        return subprocess.run(
+            [python, "-I", "-c", snippet, *args],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=timeout,
             check=False,
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
-        return {}
+        return ""
+
+
+def _competition_facts_via_cli(slug: str) -> dict[str, Any]:
+    """competition_facts through the Python the `kaggle` command runs on."""
+    out = run_on_kaggle_python(_FACTS_SNIPPET, slug)
     wanted = ("RF_KERNELS_ONLY=", "RF_MAX_DAILY=")
     found = dict(line.split("=", 1) for line in out.splitlines() if line.startswith(wanted))
     if not found:

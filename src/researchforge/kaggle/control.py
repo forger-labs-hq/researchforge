@@ -611,8 +611,13 @@ def ask_submission(
     *,
     source: str = "",
     require_output: bool = True,
+    notify_person: bool = True,
 ) -> Interaction:
-    """Ask whether to submit one round; answering "yes" submits it (kaggle.submission)."""
+    """Ask whether to submit one round; answering "yes" submits it (kaggle.submission).
+
+    A round already offered and still open is not asked again: the engine and the
+    agent driving a launch both offer improved rounds, seconds apart.
+    """
     from researchforge.kaggle.submission import submittable
 
     if require_output and not submittable(artifacts_dir, round_num):
@@ -620,15 +625,21 @@ def ask_submission(
             f"R{round_num} left nothing Kaggle takes (it wrote no submission file), "
             "so it cannot be submitted; nothing was asked"
         )
+    key = f"round:{round_num}"
+    for open_item in open_interactions(artifacts_dir):
+        if open_item.kind == "submission_approval" and open_item.answer_key == key:
+            return open_item
     item = request_interaction(
         artifacts_dir,
         question,
         kind="submission_approval",
         options=["yes", "no"],
         default="no",
-        answer_key=f"round:{round_num}",
+        answer_key=key,
         source=source or "submission offer",
     )
+    if not notify_person:
+        return item
     slug = artifacts_dir.name.removeprefix(".overnight_")
     notify(
         artifacts_dir,
@@ -642,9 +653,18 @@ def ask_submission(
 
 
 def offer_submission(
-    artifacts_dir: Path, round_num: int, title: str, metric: float | None, target: str
+    artifacts_dir: Path,
+    round_num: int,
+    title: str,
+    metric: float | None,
+    target: str,
+    *,
+    note: str = "",
 ) -> Interaction | None:
     """Ask the human whether to submit an improved round, as the submission policy says.
+
+    ``note`` is added to the question (a steered round: what it followed, and whether
+    it beat the best).
 
     aggressive   — after any improved round, even one that left nothing to submit
     balanced     — after an improved round that left something Kaggle takes (its
@@ -668,6 +688,8 @@ def offer_submission(
         else f"ran on {target} and wrote a submission but printed no score; "
         "only Kaggle can score it"
     )
+    if note:
+        measured += f"; {note}"
     return ask_submission(
         artifacts_dir,
         round_num,

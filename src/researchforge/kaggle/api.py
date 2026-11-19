@@ -358,7 +358,9 @@ def push_kernel_versioned(kernel_dir: Path, timeout_seconds: int = 120) -> tuple
 def get_kernel_run_status(kernel_ref: str) -> tuple[str, str]:
     """Return (status, raw_output) for a kernel.
 
-    Status values: "complete", "error", "running", "queued", "cancelacknowledged", "unknown"
+    Status values: "complete", "error", "running", "queued", "cancelacknowledged",
+    "missing" (Kaggle answers 404: no such notebook, which is also what it says for a
+    moment right after a push), "unknown".
     raw_output is the full CLI stdout — kept so callers can surface it in timeout errors.
     """
     try:
@@ -372,7 +374,7 @@ def get_kernel_run_status(kernel_ref: str) -> tuple[str, str]:
         raw = result.stdout.strip() or result.stderr.strip()
         if result.returncode != 0:
             return (
-                "unknown",
+                "missing" if "404" in result.stderr and "Not Found" in result.stderr else "unknown",
                 f"exit={result.returncode} stdout={result.stdout[:200]} "
                 f"stderr={result.stderr[:200]}",
             )

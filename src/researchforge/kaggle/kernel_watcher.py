@@ -276,7 +276,38 @@ def fetch_submissions(slug: str, timeout: int = 30) -> tuple[list[dict[str, Any]
     rows = [
         {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader
     ]
+    # The CSV leaves out why a submission failed; a notebook that ran out of time on
+    # Kaggle is listed "complete" with no score, and only the API says "exceeded the
+    # allowed runtime".
+    errors = submission_errors(slug)
+    for row in rows:
+        if errors.get(str(row.get("ref") or "")):
+            row["errordescription"] = errors[str(row["ref"])]
     return rows, ""
+
+
+_ERRORS_SNIPPET = """
+import json, sys
+from kaggle.api.kaggle_api_extended import KaggleApi
+api = KaggleApi()
+api.authenticate()
+subs = api.competition_submissions(sys.argv[1]) or []
+print(json.dumps({str(s.ref): s.error_description for s in subs if s.error_description}))
+"""
+
+
+def submission_errors(slug: str) -> dict[str, str]:
+    """{submission ref: Kaggle's error text} for this competition's failed submissions."""
+    import json
+
+    from researchforge.kaggle.competition_reader import run_on_kaggle_python
+
+    out = run_on_kaggle_python(_ERRORS_SNIPPET, slug).strip().splitlines()
+    try:
+        got = json.loads(out[-1]) if out else {}
+    except ValueError:
+        return {}
+    return {str(k): str(v) for k, v in got.items()} if isinstance(got, dict) else {}
 
 
 def save_submissions_snapshot(artifacts_dir: Path, rows: list[dict[str, Any]], error: str) -> None:
@@ -353,7 +384,8 @@ def _notify_submission_event(
         private_str = f" | Private: {private}" if private else ""
         msg = {
             "listed": f"{filename} received — Kaggle is scoring it ({date})",
-            "failed": f"{filename} failed on Kaggle ({date})",
+            "failed": f"{filename} failed on Kaggle ({date})"
+            + (f": {sub['errordescription'][:200]}" if sub.get("errordescription") else ""),
         }.get(event, f"{filename} resolved — {score_str}{private_str} ({date})")
         title = {
             "listed": f"Kaggle submission received: {slug}",

@@ -25,6 +25,7 @@ OUTPUTS_FILE = "round_outputs.json"
 LOG_FILE = "submissions_made.jsonl"
 REFUSED_FILE = "submissions_refused.jsonl"  # what Kaggle said when it refused one
 _ROUND_IN_QUESTION = re.compile(r"\bSubmit R(\d+)\b")
+_QUOTED_TITLE = re.compile(r"\bSubmit R\d+ '(.*?)' \(")
 
 
 def record_round_outputs(artifacts_dir: Path, round_num: int, outputs: dict[str, Any]) -> None:
@@ -118,6 +119,112 @@ def withdraw_unsubmittable(artifacts_dir: Path) -> list[int]:
     return closed
 
 
+_ROUND_IN_DESCRIPTION = re.compile(r"\bR(\d+)\b|\bround_(\d+)\b")
+
+
+def leaderboard_by_round(artifacts_dir: Path) -> dict[int, dict[str, Any]]:
+    """What Kaggle made of each submitted round, from the watcher's submissions.json.
+
+    A submission names its round in its description ("RF R21: …"; older ones
+    "round_14"). Per round: ``public`` (the newest public score, or None), ``status``
+    ("scored", "pending", "no_score" when Kaggle finished without one, "error"),
+    ``error`` (Kaggle's reason), ``date`` and ``submissions`` (how many were sent).
+    """
+    snap = read_json(artifacts_dir / "submissions.json", {}) or {}
+    subs = snap.get("submissions", []) if isinstance(snap, dict) else []
+    out: dict[int, dict[str, Any]] = {}
+    for x in sorted(
+        (x for x in subs if isinstance(x, dict)), key=lambda x: str(x.get("date") or "")
+    ):  # oldest first, so the newest submission of a round has the last word
+        m = _ROUND_IN_DESCRIPTION.search(str(x.get("description") or ""))
+        if not m:
+            continue
+        num = int(m.group(1) or m.group(2))
+        raw = str(x.get("status") or "").lower().replace("submissionstatus.", "")
+        try:
+            public: float | None = float(str(x.get("publicscore", x.get("publicScore"))))
+        except (TypeError, ValueError):
+            public = None
+        # Kaggle lists a notebook that ran out of time as "complete" with no score; only
+        # its error text (kernel_watcher.submission_errors) says what happened.
+        error = str(x.get("errorDescription") or x.get("errordescription") or "")
+        status = (
+            "scored"
+            if public is not None
+            else "error"
+            if error or "error" in raw
+            else "no_score"
+            if "complete" in raw
+            else "pending"
+        )
+        prev = out.get(num, {})
+        row = {
+            "public": public,
+            "status": status,
+            "error": error,
+            "date": str(x.get("date") or ""),
+            "submissions": int(prev.get("submissions", 0)) + 1,
+        }
+        if public is None and prev.get("public") is not None:
+            # A later submission still scoring (or unscored) keeps the score it had.
+            row = {**prev, "submissions": row["submissions"], "latest": status}
+        out[num] = row
+    return out
+
+
+LEADERBOARD_NOTE = (
+    "Our submitted rounds as Kaggle scored them: the local metric beside the public "
+    "leaderboard score. The LB is what counts. Where the two disagree, the local benchmark "
+    "does not predict the LB for that kind of change: weigh a new idea by how similar "
+    "rounds did on the LB, not by local gains alone, and say so in the rationale. A round "
+    "Kaggle failed (lb_status error, with Kaggle's reason in lb_error, e.g. a notebook that "
+    "exceeded the allowed runtime on the hidden test set) will fail the same way again: a "
+    "new round built on it must remove the cause (a shorter run, fewer calls or tasks, a "
+    "time guard) and say how in its rationale."
+)
+
+
+def leaderboard_table(artifacts_dir: Path, limit: int = 15) -> list[dict[str, Any]]:
+    """Submitted rounds, newest first: round, title, local metric, LB score and status."""
+    import sqlite3
+
+    lb = leaderboard_by_round(artifacts_dir)
+    db = artifacts_dir / "experiment_log.db"
+    local: dict[int, tuple[str, float | None]] = {}
+    if lb and db.exists():
+        with sqlite3.connect(db) as conn:
+            for num, title, passed, metric in conn.execute(
+                "SELECT round_num, patch_description, full_passed, full_metric FROM experiments"
+            ):
+                local[int(num)] = (str(title or ""), metric if passed else None)
+    rows = []
+    for num in sorted(lb, reverse=True)[:limit]:
+        title, metric = local.get(num, ("", None))
+        v = lb[num]
+        rows.append(
+            {
+                "round": num,
+                "title": title[:100],
+                "local": metric,
+                "lb": v.get("public"),
+                "lb_status": v.get("status"),
+                **({"lb_error": v["error"]} if v.get("error") else {}),
+            }
+        )
+    return rows
+
+
+def submitted_rounds(artifacts_dir: Path) -> set[int]:
+    """Rounds sent to Kaggle (submissions_made.jsonl)."""
+    rounds: set[int] = set()
+    log = artifacts_dir / LOG_FILE
+    if log.exists():
+        for line in log.read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(ValueError, AttributeError, TypeError):
+                rounds.add(int(json.loads(line).get("round")))
+    return rounds
+
+
 def _asked_or_submitted(artifacts_dir: Path) -> set[int]:
     from researchforge.kaggle import control
 
@@ -126,12 +233,7 @@ def _asked_or_submitted(artifacts_dir: Path) -> set[int]:
         for q in control.load_interactions(artifacts_dir)
         if q.kind == "submission_approval"
     }
-    log = artifacts_dir / LOG_FILE
-    if log.exists():
-        for line in log.read_text(encoding="utf-8").splitlines():
-            with contextlib.suppress(ValueError, AttributeError):
-                rounds.add(int(json.loads(line).get("round")))
-    return {r for r in rounds if r is not None}
+    return {r for r in rounds if r is not None} | submitted_rounds(artifacts_dir)
 
 
 def best_round(artifacts_dir: Path) -> tuple[int, str, float] | None:
@@ -203,14 +305,108 @@ def offer_missed(artifacts_dir: Path) -> int | None:
     if best is not None:
         candidates.append(best)
     candidates += [(num, title, None) for num, title in unscored_rounds(artifacts_dir)]
+    notes: dict[int, str] = {}
+    for num, title, metric, note in steered_candidates(artifacts_dir, best):
+        notes[num] = note
+        candidates.append((num, title, metric))
     first = None
     for num, title, metric in candidates:
         if num in asked:
             continue
         asked.add(num)
-        if control.offer_submission(artifacts_dir, num, title, metric, target) is not None:
+        offered = control.offer_submission(
+            artifacts_dir, num, title, metric, target, note=notes.get(num, "")
+        )
+        if offered is not None:
             first = first if first is not None else num
     return first
+
+
+def steered_candidates(
+    artifacts_dir: Path, best: tuple[int, str, float] | None
+) -> list[tuple[int, str, float | None, str]]:
+    """(round, title, metric, note) of rounds that followed the person's steer and left a file.
+
+    Offered whether or not they beat the best: the person asked for that work, so they
+    judge it. The note says what the round followed and, when it fell short, by how much.
+    """
+    import sqlite3
+
+    from researchforge.kaggle.benchmark_runner import UNSCORED_PATTERN
+    from researchforge.kaggle.experiment_loop import archived_rounds
+    from researchforge.kaggle.steering import steered_rounds
+
+    followed = {
+        n: [g for g in gs if g.get("how") == "followed"]
+        for n, gs in steered_rounds(artifacts_dir).items()
+    }
+    followed = {n: gs for n, gs in followed.items() if gs}
+    db = artifacts_dir / "experiment_log.db"
+    if not followed or not db.exists():
+        return []
+    meta = read_json(artifacts_dir / "competition_metadata.json", {}) or {}
+    minimize = str(meta.get("metric_direction", "")).lower() == "minimize"
+    marks = ",".join("?" * len(followed))
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT round_num, patch_description, full_passed, full_metric, rejected_reason "
+            f"FROM experiments WHERE round_num IN ({marks}) ORDER BY round_num",
+            list(followed),
+        ).fetchall()
+    hidden = archived_rounds(artifacts_dir)
+    out: list[tuple[int, str, float | None, str]] = []
+    for num, title, passed, metric, reason in rows:
+        scored = bool(passed) and metric is not None
+        if num in hidden or not submittable(artifacts_dir, int(num)):
+            continue
+        if not scored and not UNSCORED_PATTERN.search(str(reason or "")):
+            continue  # failed: whatever file it left is not a result to judge
+        g = followed[num][0]
+        note = "followed your " + ("direction" if g.get("kind") == "direction" else "pinned idea")
+        score = float(metric) if scored else None
+        if score is not None and best is not None and best[0] != num:
+            beat = score < best[2] if minimize else score > best[2]
+            if not beat:
+                note += f"; did not beat the best: {score:.4f} vs {best[2]:.4f} (R{best[0]})"
+        out.append((int(num), str(title or f"Round {num}"), score, note))
+    return out
+
+
+def round_title(artifacts_dir: Path, round_num: int) -> str:
+    """The round's own title from the experiment log ("" if unknown).
+
+    Read from the log, not the offer's text: an offer quotes the title and adds notes
+    of its own, so the text cannot say where the title ends.
+    """
+    import sqlite3
+
+    db = artifacts_dir / "experiment_log.db"
+    if not db.exists():
+        return ""
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT patch_description FROM experiments WHERE round_num = ?", (round_num,)
+        ).fetchone()
+    return str(row[0] or "") if row else ""
+
+
+def submit_now(artifacts_dir: Path, slug: str, round_num: int, comment: str = "") -> str:
+    """Submit one round the person picked (Runs, DAG): its offer, answered yes.
+
+    An open offer for the round is reused. Raises ValueError, leaving the offer
+    open, when the round left nothing Kaggle takes or Kaggle refuses it.
+    """
+    from researchforge.kaggle import control
+
+    title = round_title(artifacts_dir, round_num) or f"Round {round_num}"
+    item = control.ask_submission(
+        artifacts_dir,
+        round_num,
+        f"Submit R{round_num} '{title}' (picked by you) to Kaggle?",
+        source="you",
+        notify_person=False,  # they are the one submitting it
+    )
+    return answer(artifacts_dir, slug, item.id, "yes", comment)
 
 
 def is_code_competition(artifacts_dir: Path, slug: str) -> bool:
@@ -450,7 +646,8 @@ def answer(artifacts_dir: Path, slug: str, qid: str, value: str, comment: str = 
     round_num = round_of(item.answer_key, item.question)
     if round_num is None:
         raise ValueError(f"cannot tell which round {qid} is about; nothing was submitted")
-    title = re.search(r"'(.*)'", item.question)
-    reply = submit_round(artifacts_dir, slug, round_num, title.group(1) if title else "")
+    quoted = _QUOTED_TITLE.search(item.question)  # for a round missing from the log
+    title = round_title(artifacts_dir, round_num) or (quoted.group(1) if quoted else "")
+    reply = submit_round(artifacts_dir, slug, round_num, title)
     control.respond(artifacts_dir, qid, "yes", comment)
     return f"R{round_num} submitted to Kaggle: {reply}"

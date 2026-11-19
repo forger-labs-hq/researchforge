@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.4.7 — Kaggle's scores on every round, steered rounds first, Submit any round (2026-11-19)
+
+- **Kaggle's score sits on the round it scored, and the next proposal reads it.** Every
+  submission's public leaderboard score is matched to its round ("RF R25: …", or "round_14" in
+  older descriptions). Runs has a **Kaggle LB** column and the DAG node shows "LB 0.13 (local
+  0.40)"; a round Kaggle is still scoring says so, and one Kaggle finished without a score
+  (usually a notebook that failed or ran out of time there) shows **no score**. `prepare-round`
+  gives the agent a `leaderboard` table (local metric vs LB, newest first) and the API-key loop
+  gets the same as a context section, with the rule to trust the LB where the two disagree.
+  Enveda's rounds score about 0.93 locally but 0.10–0.47 on the LB; until now no proposal knew.
+- **A submission Kaggle failed says why, and the next round is told to fix it.** Kaggle lists
+  a notebook that ran out of time on the hidden test set as "complete" with no score; only its
+  API says "exceeded the allowed runtime". The submissions listing now carries that reason, so
+  Gemma's R24 and R26 read **timed out** (with Kaggle's text) in Runs, the DAG and
+  Submissions instead of "no score", the failure push includes it, and the `leaderboard`
+  table gives proposals `lb_error` with the rule to remove the cause (a shorter run, fewer
+  calls, a time guard) before building on such a round.
+- **A round whose Kaggle notebook is gone stops waiting.** Gemma's R27 and R33 had been
+  "collected when it finishes" since their notebooks outlived the round's wait, but Kaggle no
+  longer has those notebooks (404), so they never finished. A pending round whose notebook
+  Kaggle reports missing for more than 12 hours is now closed as failed, with the reason.
+- **A steered offer's own words no longer end up in Kaggle's description.** The submit step
+  took the round's title from the offer's text up to its last apostrophe, so a note like
+  "didn't beat" ran into the description (R37). The title now comes from the experiment log.
+- **Submission offers for your steered rounds come first.** In 🔔, an offer for a round that
+  followed one of your directions or pinned ideas now sits at the top of its project, marked
+  🧭 with an amber edge and the direction it followed. It used to sort by age, so with dozens of
+  newer offers (Enveda had 32) the RL round you asked for was buried. The project's row in 🔔
+  says how many offers were steered by you.
+- **Steered rounds are offered even when they don't beat the best.** A round that followed
+  your direction or pinned idea and wrote a submission file now gets a Submit? offer, labelled
+  with what it followed and, when it fell short, by how much ("followed your direction; didn't
+  beat the best: 0.4000 vs 0.6000 (R45)"). You asked for that work, so you judge it. Gemma's RL
+  rounds R36 and R37 tied the best of the time and were never offered before. Failed rounds,
+  rounds already asked about and the conservative submission policy are left alone.
+- **Submit any round from Runs or the DAG.** Every finished round that left something Kaggle
+  takes has a **Submit** button in Runs and in its DAG node detail; it asks once, then sends the
+  round (reusing its open offer if it has one). Rounds already sent show **submitted ✓**.
+  If Kaggle refuses, nothing is used and the offer stays in 🔔.
+- **A round is offered for submission once.** The engine and the agent driving an auto-run
+  launch both offer improved rounds, seconds apart, so a round could show up twice in 🔔
+  (Name that LLM's R11 did). Offering a round that already has an open offer now returns that
+  offer instead of asking again.
+
 ## 0.4.6 — Token metering that counts, and kernel ideas through Claude (2026-11-19)
 
 - **Kernel-idea extraction works through the Claude driver.** The prompt (a list of notebook

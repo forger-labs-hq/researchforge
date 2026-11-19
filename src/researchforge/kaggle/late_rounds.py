@@ -15,6 +15,9 @@ from pathlib import Path
 from researchforge.kaggle.workspace import read_json
 
 _STILL_RUNNING = ("running", "queued", "unknown")
+# Kaggle says 404 for a notebook it no longer has, and briefly for one just pushed; a
+# pending round this old whose notebook is gone is closed instead of waited on forever.
+MISSING_AFTER_HOURS = 12
 
 
 def pending_rounds(artifacts_dir: Path) -> dict[int, dict[str, object]]:
@@ -37,10 +40,31 @@ def collect(artifacts_dir: Path) -> list[str]:
     for round_num, out in sorted(pending_rounds(artifacts_dir).items()):
         ref = str(out["kernel_ref"])
         status, _ = get_kernel_run_status(ref)
+        if (
+            status == "missing"
+            and _hours_since_start(artifacts_dir, round_num) < MISSING_AFTER_HOURS
+        ):
+            continue
         if status in _STILL_RUNNING:
             continue
         lines.append(_finish(artifacts_dir, round_num, ref, out.get("kernel_version"), status))
     return lines
+
+
+def _hours_since_start(artifacts_dir: Path, round_num: int) -> float:
+    from datetime import datetime
+
+    with sqlite3.connect(artifacts_dir / "experiment_log.db") as conn:
+        row = conn.execute(
+            "SELECT started_at FROM experiments WHERE round_num=?", (round_num,)
+        ).fetchone()
+    try:
+        started = datetime.fromisoformat(str(row[0])) if row and row[0] else None
+    except ValueError:
+        started = None
+    if started is None:
+        return 0.0  # unknown age: keep waiting rather than close a round too early
+    return (datetime.now() - started.replace(tzinfo=None)).total_seconds() / 3600
 
 
 def _finish(artifacts_dir: Path, round_num: int, ref: str, version: object, status: str) -> str:
@@ -58,12 +82,18 @@ def _finish(artifacts_dir: Path, round_num: int, ref: str, version: object, stat
     if status == "complete":
         result = BenchmarkRunner(setup).collect_kernel(ref, kernel_version, 0.0)
     else:
+        why = (
+            f"Kaggle no longer has the notebook {ref} (404): it was deleted or never "
+            "created, so its result cannot be collected"
+            if status == "missing"
+            else f"the kernel {ref} ended on Kaggle with status: {status}"
+        )
         result = BenchmarkResult(
             passed=False,
             metric_value=0.0,
             metric_improved=False,
             duration_seconds=0.0,
-            error_message=f"the kernel {ref} ended on Kaggle with status: {status}",
+            error_message=why,
         )
     outputs = dict(result.outputs or {"kernel_ref": ref, "kernel_version": kernel_version})
     record_round_outputs(artifacts_dir, round_num, outputs)
