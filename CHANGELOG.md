@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.8 — Failed submissions become fix rounds, and watchers update themselves (2026-11-20)
+
+- **A submission Kaggle fails becomes a fix round, first in Up next.** When Kaggle fails one
+  of our submissions (out of time on the hidden test set, out of memory, a wrong file…), the
+  monitor queues a 🔧 fix item at the top of Up next within minutes. It quotes Kaggle's
+  reason, names older rounds that failed the same way (one fix per distinct error, for
+  failures in the last 7 days), points at the failed round's run log, and carries the
+  direction or pinned idea that round followed. The round that follows it prints
+  `FIX_CHECK: passed <evidence>` (or `failed <why>`); only a passing fix is offered for
+  submission, first in 🔔 and labelled "fixes R37 (timed out on Kaggle); check: …". A fix
+  that does not pass is tried once more, then 🔔 asks whether to try another. Nothing is
+  submitted without your yes.
+- **Watchers update themselves.** A watcher kept the code it started with until someone
+  restarted it, so 0.4.7's reading of Kaggle's error text never reached Gemma's watcher and
+  R37 stayed "scoring…" after Kaggle had timed it out. A watcher now restarts itself on the
+  new code when ResearchForge is updated under it.
+- **A submission still scoring is checked every 5 minutes** instead of 15, so its score (or
+  its failure, and the fix round that follows) reaches the dashboard sooner.
+
 ## 0.4.7 — Kaggle's scores on every round, steered rounds first, Submit any round (2026-11-19)
 
 - **Kaggle's score sits on the round it scored, and the next proposal reads it.** Every

@@ -616,3 +616,128 @@ def test_the_submission_listing_carries_kaggles_reason_for_a_failure(
     monkeypatch.setattr(kernel_watcher, "submission_errors", lambda slug: errors)
     rows, err = kernel_watcher.fetch_submissions(SLUG)
     assert err == "" and rows[0]["errordescription"] == "exceeded the allowed runtime"
+
+
+TIMEOUT = "Your submission notebook exceeded the allowed runtime."
+
+
+def _failed_on_kaggle(d: Path, *rounds: int, error: str = TIMEOUT) -> None:
+    from datetime import datetime
+
+    today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    subs = [
+        {
+            "description": f"RF R{n}: x",
+            "date": today,
+            "status": "SubmissionStatus.COMPLETE",
+            "publicscore": "",
+            "errordescription": error,
+        }
+        for n in rounds
+    ]
+    (d / "submissions.json").write_text(json.dumps({"submissions": subs}))
+
+
+def test_a_failed_submission_queues_one_fix_that_inherits_the_steer(tmp_path: Path) -> None:
+    from researchforge.kaggle import fixes, steering
+
+    d = _project(tmp_path)
+    _log(d, [(3, 0.4, 1, 1), (5, 0.4, 1, 0)], minimize=False)
+    rl = steering.add(d, "try RL")
+    steering.record_round(d, 5, {"follows": [rl.id]})
+    _failed_on_kaggle(d, 3, 5)
+    (line,) = fixes.queue_fixes(d)
+    assert line == "R5 timed out on Kaggle: fix round 1 queued first in Up next"
+    head = steering.up_next(d)[0]
+    assert head["kind"] == "fix" and head["fixes_round"] == 5
+    assert (
+        "R3 failed the same way" in head["text"]
+        and "It continues your direction: try RL" in head["text"]
+    )
+    assert "FIX_CHECK: passed" in head["text"]
+    assert fixes.queue_fixes(d) == []  # once per failure
+
+
+def test_a_fix_is_offered_first_only_once_it_shows_the_error_is_gone(tmp_path: Path) -> None:
+    from researchforge.kaggle import fixes, steering
+    from researchforge.kaggle.benchmark_runner import declared_fix_check
+
+    d = _project(tmp_path)
+    _log(d, [(5, 0.6, 1, 1), (6, 0.5, 1, 0)], minimize=False)
+    _failed_on_kaggle(d, 5)
+    fixes.queue_fixes(d)
+    fix = steering.up_next(d)[0]
+    steering.record_round(d, 6, {"follows": [fix["id"]]})
+    f = tmp_path / "r6.csv"
+    f.write_text("id,y\n")
+    submission.record_round_outputs(d, 6, {"submission_file": str(f)})
+    assert fixes.unproven(d, 6)
+    assert not any(q.answer_key == "round:6" for q in control.open_interactions(d))
+    check = declared_fix_check("...\nFIX_CHECK: passed 41 min on 2x data, guard at 7h\n")
+    assert check == {"passed": True, "evidence": "41 min on 2x data, guard at 7h"}
+    submission.record_round_outputs(d, 6, {"submission_file": str(f), "fix_check": check})
+    submission.offer_missed(d)
+    (q,) = [q for q in control.open_interactions(d) if q.answer_key == "round:6"]
+    assert "fixes R5 (timed out on Kaggle); check: 41 min on 2x data" in q.question
+    assert fixes.queue_fixes(d) == []  # it passed: no second try
+
+
+def test_a_fix_that_does_not_fix_it_is_tried_once_more_then_asks(tmp_path: Path) -> None:
+    from researchforge.kaggle import fixes, steering
+
+    d = _project(tmp_path)
+    _log(d, [(5, 0.6, 1, 1), (6, 0.5, 1, 0), (7, 0.5, 1, 0)], minimize=False)
+    _failed_on_kaggle(d, 5)
+    fixes.queue_fixes(d)
+    steering.record_round(d, 6, {"follows": [steering.up_next(d)[0]["id"]]})
+    submission.record_round_outputs(
+        d, 6, {"fix_check": {"passed": False, "evidence": "still 9h on 2x data"}}
+    )
+    (line,) = fixes.queue_fixes(d)
+    assert "fix round 2 queued" in line
+    second = steering.up_next(d)[0]
+    assert "R6 did not fix it: still 9h on 2x data" in second["text"]
+    steering.record_round(d, 7, {"follows": [second["id"]]})  # prints no FIX_CHECK at all
+    (line,) = fixes.queue_fixes(d)
+    assert line.endswith("asked you") and steering.up_next(d) == []
+    (q,) = [q for q in control.open_interactions(d) if q.answer_key == "fix:5"]
+    assert fixes.queue_fixes(d) == []  # asked once
+    control.respond(d, q.id, "try another fix")
+    (line,) = fixes.answered(d)
+    assert "fix round 1 queued" in line and steering.up_next(d)[0]["fixes_round"] == 5
+    assert fixes.answered(d) == []
+
+
+def test_old_failures_are_left_alone(tmp_path: Path) -> None:
+    from researchforge.kaggle import fixes
+
+    d = _project(tmp_path)
+    _log(d, [(5, 0.6, 1, 1)], minimize=False)
+    snap = {
+        "submissions": [
+            {
+                "description": "RF R5",
+                "date": "2025-01-01 00:00:00",
+                "status": "COMPLETE",
+                "errordescription": TIMEOUT,
+            }
+        ]
+    }
+    (d / "submissions.json").write_text(json.dumps(snap))
+    assert fixes.queue_fixes(d) == []
+
+
+def test_the_monitor_restarts_itself_when_researchforge_is_updated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    from researchforge.kaggle import cli
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(os, "execv", lambda exe, argv: ran.append(argv))
+    monkeypatch.setattr(cli, "_code_stamp", lambda: 100.0)
+    cli._reload_if_updated(100.0)
+    assert ran == []
+    cli._reload_if_updated(50.0)
+    assert len(ran) == 1  # the same command line, run again on the new code

@@ -362,6 +362,25 @@ def steered_candidates(
         if not scored and not UNSCORED_PATTERN.search(str(reason or "")):
             continue  # failed: whatever file it left is not a result to judge
         g = followed[num][0]
+        if g.get("kind") == "fix":
+            from researchforge.kaggle.fixes import fix_check, fixed_by, short_error
+
+            fix, check = fixed_by(artifacts_dir, int(num)), fix_check(artifacts_dir, int(num))
+            if not fix or not (check and check.get("passed")):
+                continue  # a fix is offered only once it showed the error is gone
+            note = (
+                f"fixes R{fix.get('round')} ({short_error(str(fix.get('error') or ''))}); "
+                f"check: {str(check.get('evidence') or 'passed')[:200]}"
+            )
+            out.append(
+                (
+                    int(num),
+                    str(title or f"Round {num}"),
+                    None if not scored else float(metric),
+                    note,
+                )
+            )
+            continue
         note = "followed your " + ("direction" if g.get("kind") == "direction" else "pinned idea")
         score = float(metric) if scored else None
         if score is not None and best is not None and best[0] != num:

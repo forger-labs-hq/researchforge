@@ -609,14 +609,16 @@ function queueList(p, full) {
   const rows = queueRows(p), id = p.id;
   if (!rows.length) return `<div class="sub">The queue is empty: write a direction or add an idea.</div>`;
   const shown = full ? rows : rows.slice(0, 3);
-  const tag = r => r.group === "steer" ? (r.d.kind === "standing" ? '<span class="badge b-purple">standing · every round</span>' : `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR}">🧭 your direction</span>`)
+  const isFix = r => r.group === "steer" && r.d.fixes && r.d.fixes.round;
+  const tag = r => isFix(r) ? `<span class="badge" style="color:var(--red);border-color:var(--red)" title="Kaggle failed R${esc(r.d.fixes.round)}'s submission; this round must fix it and print FIX_CHECK">🔧 fix R${esc(r.d.fixes.round)} · try ${esc(r.d.fixes.attempt || 1)} of 2</span>`
+    : r.group === "steer" ? (r.d.kind === "standing" ? '<span class="badge b-purple">standing · every round</span>' : `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR}">🧭 your direction</span>`)
     : r.group === "pins" ? '<span class="badge b-purple">📌 pinned</span>' : '<span class="badge b-gray">engine</span>';
   let place = 0;
   return shown.map(r => {
     const standing = r.group === "steer" && r.d.kind === "standing";
     const num = standing ? "∞" : String(++place);
     const head = !standing && place === 1;
-    const extra = r.group === "steer" ? `<div class="flex" style="margin-top:2px">${dirState(r.d)}<span class="sub">you · ${when(r.d.at)}</span>${full ? `<button class="right" data-act="steer-remove" data-id="${id}" data-d="${esc(r.d.id)}">Remove</button>` : ""}</div>${full ? dirThread(r.d) : ""}`
+    const extra = r.group === "steer" ? `<div class="flex" style="margin-top:2px">${dirState(r.d)}<span class="sub">${isFix(r) ? "queued by ResearchForge" : "you"} · ${when(r.d.at)}</span>${full ? `<button class="right" data-act="steer-remove" data-id="${id}" data-d="${esc(r.d.id)}">Remove</button>` : ""}</div>${full ? dirThread(r.d) : ""}`
       : r.group === "pins" && full ? `<div class="flex" style="margin-top:2px"><button class="right" data-act="pin" data-op="unpin" data-id="${id}" data-pin="${esc(r.id)}">Unpin</button></div>`
       : r.why ? `<div class="dim">${esc(r.why)}</div>` : "";
     return `<div ${full && r.group !== "engine" ? `draggable="true" data-dragq="${r.group}" data-pid="${id}" data-qid="${esc(r.id)}" data-i="${r.i}"` : ""} style="display:flex;gap:10px;align-items:flex-start;margin:6px 0;padding:8px 10px;border:1px solid ${head ? STEER_COLOR : "var(--border)"};border-radius:8px;background:${r.group === "engine" ? "transparent" : "var(--panel2)"}">
@@ -1131,11 +1133,12 @@ function archivedRuns() {
 }
 // 🧭 marks what your Steer directions and pinned ideas led to (steered_rounds.json).
 const STEER_COLOR = "#f59e0b";
-function steerWhy(list) { return (list || []).map(g => `${g.how === "declined" ? "Declined" : "Followed"} your ${g.kind === "direction" ? "direction" : "pinned idea"}: ${g.text}${g.reason ? " — " + g.reason : ""}`).join("\n"); }
+function steerWhy(list) { return (list || []).map(g => `${g.how === "declined" ? "Declined" : "Followed"} ${g.kind === "fix" ? "a fix for a failed submission" : g.kind === "direction" ? "your direction" : "your pinned idea"}: ${g.text}${g.reason ? " — " + g.reason : ""}`).join("\n"); }
 function steerTag(list) {
   const followed = (list || []).filter(g => g.how === "followed");
   if (!followed.length) return "";
-  return `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR};background:#422006" title="${esc(steerWhy(followed))}">🧭 steered</span>`;
+  const fix = followed.some(g => g.kind === "fix");
+  return `<span class="badge" style="color:${STEER_COLOR};border-color:${STEER_COLOR};background:#422006" title="${esc(steerWhy(followed))}">${fix ? "🔧 fix" : "🧭 steered"}</span>`;
 }
 const isSteered = e => (e.steered || []).some(g => g.how === "followed");
 // Submit any finished round that left something Kaggle takes, steered or not.

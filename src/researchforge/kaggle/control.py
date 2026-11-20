@@ -673,11 +673,14 @@ def offer_submission(
 
     Nothing is submitted until the person answers "yes" (kaggle.submission does it then).
     """
+    from researchforge.kaggle.fixes import unproven
     from researchforge.kaggle.submission import submittable
 
     policy = LoopControl.load(artifacts_dir).submission_policy
     if policy == "conservative":
         return None
+    if unproven(artifacts_dir, round_num):
+        return None  # a fix round that has not shown the error is gone would fail again
     if policy == "balanced" and not submittable(artifacts_dir, round_num):
         return None
     scored = isinstance(metric, (int, float))

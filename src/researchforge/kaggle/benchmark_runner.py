@@ -48,6 +48,24 @@ UNSCORED_PATTERN = re.compile(
 _SUBMISSION_LINE = re.compile(r"^SUBMISSION_FILE:\s*(\S.*?)\s*$", re.M)
 
 
+# A round that fixes a failed submission says whether the error is gone, and how it knows.
+_FIX_CHECK_LINE = re.compile(r"^FIX_CHECK:\s*(passed|failed)\b[\s:—-]*(.*?)\s*$", re.M | re.I)
+
+
+def declared_fix_check(text: str) -> dict[str, object] | None:
+    """The last ``FIX_CHECK: passed|failed <evidence>`` line a run printed, or None."""
+    found = _FIX_CHECK_LINE.findall(text or "")
+    if not found:
+        return None
+    verdict, evidence = found[-1]
+    return {"passed": verdict.lower() == "passed", "evidence": evidence[:500]}
+
+
+def _with_fix_check(outputs: dict[str, object] | None, text: str) -> dict[str, object] | None:
+    check = declared_fix_check(text)
+    return {**(outputs or {}), "fix_check": check} if check else outputs
+
+
 def declared_submission_file(text: str) -> str:
     """The last ``SUBMISSION_FILE: <path>`` line a run printed, or ""."""
     found = _SUBMISSION_LINE.findall(text or "")
@@ -289,7 +307,10 @@ class BenchmarkRunner:
                     metric_improved=False,
                     duration_seconds=duration,
                     error_message=UNSCORED_REASON if kept else "Could not parse metric from output",
-                    outputs={"submission_file": kept} if kept else None,
+                    outputs=_with_fix_check(
+                        {"submission_file": kept} if kept else None,
+                        str(result.get("stdout_text") or ""),
+                    ),
                 )
             improved = self._metric_improved(metric, baseline_score)
             return BenchmarkResult(
@@ -297,7 +318,10 @@ class BenchmarkRunner:
                 metric_value=metric,
                 metric_improved=improved,
                 duration_seconds=duration,
-                outputs={"submission_file": kept} if kept else None,
+                outputs=_with_fix_check(
+                    {"submission_file": kept} if kept else None,
+                    str(result.get("stdout_text") or ""),
+                ),
             )
         return BenchmarkResult(
             passed=False,
@@ -587,12 +611,13 @@ class BenchmarkRunner:
         # Only the log and the submission file: a notebook can leave hundreds of files.
         output_files = fetch_kernel_output(kernel_ref, output_dir, file_pattern=r"^submission\.")
         # The score is what the run printed: its log, never a data file it wrote.
-        metric, declared = None, ""
+        metric, declared, check = None, "", None
         for output_file in (p for p in output_files if p.suffix == ".log"):
             text = kernel_log_text(output_file)
             if metric is None:
                 metric = self._parse_metric({"stdout_text": text, "stderr_text": ""})
             declared = declared or declared_submission_file(text)
+            check = check or declared_fix_check(text)
         if declared and not (output_dir / Path(declared).name).is_file():
             output_files += fetch_kernel_output(
                 kernel_ref, output_dir, file_pattern=f"^{re.escape(Path(declared).name)}$"
@@ -610,6 +635,8 @@ class BenchmarkRunner:
             "kernel_version": kernel_version,
             "submission_file": str(written[0]) if written else "",
         }
+        if check:
+            outputs["fix_check"] = check
         if metric is None:
             # The notebook still ran: keep it, so it can be submitted and scored by Kaggle.
             return BenchmarkResult(

@@ -156,6 +156,9 @@ SUBMISSION_POLL_MINUTES = 15.0
 KERNEL_POLL_MINUTES = 60.0
 # Auto-run with back_to_back: how soon after a launch ends the next may start.
 AUTO_RUN_POLL_MINUTES = 10.0
+# While Kaggle is still scoring one of ours, look again sooner: its score (or its
+# failure, which queues a fix round) should reach the project within minutes.
+SUBMISSION_PENDING_POLL_MINUTES = 5.0
 SUBMISSION_NOTICES_FILE = "submission_notices.json"
 
 
@@ -497,7 +500,9 @@ def monitor_cmd(
         _sensors.save_state(artifacts_dir, state)
 
     typer.echo(f"Monitoring {slug} every {poll_hours}h → {artifacts_dir}. Ctrl+C to stop.")
+    code_stamp = _code_stamp()
     while True:
+        _reload_if_updated(code_stamp)
         try:
             result = _run_one_cycle()
             errs = f" errors={len(result['errors'])}" if result.get("errors") else ""
@@ -508,15 +513,19 @@ def monitor_cmd(
         except Exception as exc:
             typer.echo(f"[monitor] error: {exc}", err=True)
         due = datetime.now() + _td(hours=poll_hours)
+        fast = min(submission_minutes, SUBMISSION_PENDING_POLL_MINUTES)
         steps = [m for m in (submission_minutes, kernel_minutes, AUTO_RUN_POLL_MINUTES) if m > 0]
+        steps += [fast] if submission_minutes > 0 else []
         step = _td(minutes=min(steps)) if steps else None
         next_kernels = datetime.now() + _td(minutes=kernel_minutes) if kernel_minutes > 0 else None
         next_subs = datetime.now() + _td(minutes=submission_minutes)
         while step is not None and datetime.now() + step < due:
             _wait_until_due(datetime.now() + step)
+            _reload_if_updated(code_stamp)
             if submission_minutes > 0 and datetime.now() >= next_subs:
                 _submissions_between_cycles()
-                next_subs = datetime.now() + _td(minutes=submission_minutes)
+                wait = fast if _submissions_pending(artifacts_dir) else submission_minutes
+                next_subs = datetime.now() + _td(minutes=wait)
             if next_kernels is not None and datetime.now() >= next_kernels:
                 _kernels_between_cycles()
                 next_kernels = datetime.now() + _td(minutes=kernel_minutes)
@@ -525,15 +534,23 @@ def monitor_cmd(
 
 
 def _round_followups(artifacts_dir: Path) -> None:
-    """Collect Kaggle rounds that outlived their wait, ask about a missed best round, and
+    """Collect Kaggle rounds that outlived their wait, queue fix rounds for submissions
+    Kaggle failed, ask about a missed best round (or a fix that passed its check), and
     withdraw offers for notebook rounds that wrote nothing to submit.
 
     Runs with the submission checks (every few minutes), so a late result and its
     submission question arrive without waiting for the next full cycle.
     """
-    from researchforge.kaggle import late_rounds, submission
+    from researchforge.kaggle import fixes, late_rounds, submission
 
-    for step in (late_rounds.collect, submission.offer_missed, submission.withdraw_unsubmittable):
+    steps = (
+        late_rounds.collect,
+        fixes.answered,  # "try another fix" answers: one more fix round
+        fixes.queue_fixes,  # Kaggle failed a submission, or a fix did not fix it
+        submission.offer_missed,
+        submission.withdraw_unsubmittable,
+    )
+    for step in steps:
         try:
             got = step(artifacts_dir)
         except Exception as exc:  # never let a follow-up stop the monitor
@@ -606,6 +623,45 @@ def _earlier_repo_work(artifacts_dir: Path) -> list[dict[str, Any]]:
     with contextlib.suppress(Exception):  # a broken repo DB must not stop a round
         import_repo_history(artifacts_dir)
     return earlier_work(artifacts_dir)
+
+
+def _code_stamp() -> float:
+    """Newest modification time of ResearchForge's own files (code and dashboard page)."""
+    import researchforge
+
+    root = Path(researchforge.__file__).resolve().parent
+    return max(
+        (p.stat().st_mtime for p in root.rglob("*") if p.suffix in (".py", ".html")),
+        default=0.0,
+    )
+
+
+def _reload_if_updated(stamp: float) -> None:
+    """Restart this monitor in place when ResearchForge was updated under it.
+
+    A watcher runs for days; without this it kept the code it started with, so an
+    update (reading Kaggle's error text, say) reached it only when someone restarted
+    it by hand. The same command line runs again, under launchd or in a terminal.
+    """
+    import os as _os
+    import sys as _sys
+
+    if _code_stamp() <= stamp:
+        return
+    typer.echo("[monitor] ResearchForge was updated; restarting on the new code")
+    _sys.stdout.flush()
+    argv = list(getattr(_sys, "orig_argv", []) or [_sys.executable, *_sys.argv])
+    _os.execv(_sys.executable, [_sys.executable, *argv[1:]])
+
+
+def _submissions_pending(artifacts_dir: Path) -> bool:
+    """Whether Kaggle is still scoring one of this competition's submissions."""
+    snap = read_json(artifacts_dir / "submissions.json", {}) or {}
+    return any(
+        "pending" in str(x.get("status", "")).lower()
+        for x in (snap.get("submissions", []) if isinstance(snap, dict) else [])
+        if isinstance(x, dict)
+    )
 
 
 def _wait_until_due(due: datetime, step_seconds: float = 60.0) -> None:

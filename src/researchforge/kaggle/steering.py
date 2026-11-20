@@ -52,6 +52,8 @@ class Direction:
     rounds_wanted: int = 1  # next-round directions: how many rounds must follow it
     followed_by: list[int] = field(default_factory=list)  # rounds that followed it
     declined: list[dict[str, Any]] = field(default_factory=list)  # {round, reason, at}
+    # A fix for a submission Kaggle failed (kaggle.fixes): {round, error, attempt, ...}
+    fixes: dict[str, Any] = field(default_factory=dict)
 
     @property
     def active(self) -> bool:
@@ -86,7 +88,12 @@ def _find(items: list[Direction], direction_id: str) -> Direction:
 
 
 def add(
-    artifacts_dir: Path, text: str, kind: str = "next", via: str = "dashboard", rounds: int = 1
+    artifacts_dir: Path,
+    text: str,
+    kind: str = "next",
+    via: str = "dashboard",
+    rounds: int = 1,
+    fixes: dict[str, Any] | None = None,
 ) -> Direction:
     """A new direction goes to the top of the queue: the newest one is followed first."""
     text = text.strip()
@@ -106,6 +113,7 @@ def add(
         at=_now(),
         via=via,
         rounds_wanted=rounds if kind == "next" else 1,
+        fixes=dict(fixes or {}),
     )
     items.insert(0, d)
     _save(artifacts_dir, items)
@@ -167,9 +175,10 @@ def up_next(artifacts_dir: Path) -> list[dict[str, Any]]:
     queue: list[dict[str, Any]] = [
         {
             "id": d.id,
-            "kind": "direction",
+            "kind": "fix" if d.fixes else "direction",
             "text": d.text,
             "rounds_left": max(1, d.rounds_wanted - len(d.followed_by)),
+            **({"fixes_round": d.fixes.get("round")} if d.fixes else {}),
         }
         for d in load(artifacts_dir)
         if d.kind == "next" and d.active
@@ -214,7 +223,7 @@ def check_proposal(artifacts_dir: Path, proposal: dict[str, Any]) -> str:
     head = queue[0]
     if follows(proposal, head) or head["id"] in _named(proposal, "declines"):
         return ""
-    what = "direction" if head["kind"] == "direction" else "pinned idea"
+    what = {"direction": "direction", "fix": "fix item"}.get(head["kind"], "pinned idea")
     return (
         f"the proposal ignores the person's top {what} in Up next, {head['id']}: "
         f'"{head["text"][:160]}". Follow it ("follows": ["{head["id"]}"]'
@@ -297,7 +306,8 @@ def steered_rounds(artifacts_dir: Path) -> dict[int, list[dict[str, Any]]]:
         rounds = list(d.followed_by) or (
             [d.read_by_round] if d.status == "applied" and d.read_by_round else []
         )
-        entry = {"id": d.id, "kind": "direction", "text": d.text[:300], "how": "followed"}
+        kind = "fix" if d.fixes else "direction"
+        entry = {"id": d.id, "kind": kind, "text": d.text[:300], "how": "followed"}
         for r in rounds:
             if not any(g.get("id") == d.id for g in out.get(r, [])):
                 out.setdefault(r, []).append(entry)
@@ -312,7 +322,9 @@ def prompt_lines(artifacts_dir: Path) -> list[str]:
         if d.kind == "standing"
     ]
     for item in up_next(artifacts_dir):
-        what = "Direction" if item["kind"] == "direction" else "Pinned idea"
+        what = {"direction": "Direction", "fix": "Fix a failed submission"}.get(
+            item["kind"], "Pinned idea"
+        )
         head = (
             " (head of the queue: follow it or decline it with a reason)"
             if item["place"] == 1

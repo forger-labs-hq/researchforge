@@ -446,6 +446,12 @@ How these affect your loop:
 - **A round's submission file** is `./submission.*` in its working directory, or the path the
   round prints as `SUBMISSION_FILE: <path>` on its own line. A round writing elsewhere must print
   that line, or there is nothing to approve.
+- **A 🔧 fix item at the top of Up next** means Kaggle failed one of our submissions (out of time
+  on the hidden test set, out of memory, a wrong file…). It quotes Kaggle's reason and says where
+  the failed round's run log is. Follow it like any head item (`"follows": ["<id>"]`): read the
+  log, change the cause, and make the round print `FIX_CHECK: passed <evidence the error cannot
+  happen again>` (or `FIX_CHECK: failed <why>`) on its own line. Only a passing fix is offered for
+  submission, first in 🔔; a fix that does not pass is tried once more, then the user is asked.
 - **A Kaggle kernel that outlives execute-round's wait** is recorded as still running, not as a
   failure: the monitor collects its score and submission file when it finishes (every 15 minutes)
   and asks about submitting it if it improved. Do not re-run such a round.
