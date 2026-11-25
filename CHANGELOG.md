@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.9 — Needs you vs Submit?, skip notebooks below our LB, Kaggle's refusal reasons, plugins (2026-11-26)
+
+- **Plugins.** Installed packages can now extend ResearchForge through the
+  `researchforge.plugins` entry point. A plugin can add CLI commands, entries in the live
+  dashboard's nav showing its own pages, HTTP routes under `/plugins/<name>/` (with the same
+  localhost and token checks as the dashboard's own routes), and a hook that runs after every
+  Kaggle and repository monitor cycle and shows as a sensor. `researchforge plugins` lists
+  installed plugins, what each adds and any that failed to load. A broken plugin is skipped
+  and never breaks a command; `RESEARCHFORGE_NO_PLUGINS=1` switches them all off.
+  `researchforge.plugins.facade` gives plugins a stable API for projects, 🔔 questions, plan
+  approval and steering. The dashboard's bell and **Approve plan** use the same functions.
+  See `docs/plugins.md`.
+- **🔔 separates what needs you from submission offers.** The bell has two tabs, **Needs you**
+  (questions the loop or its ideas wait for, such as raising a limit) and **Submit?** (offers);
+  it opens on Needs you, and its badge counts those in red. Home shows a red **⛔ Needs you**
+  card first and folds the offers below it. With 15 offers open, a "raise the rounds"
+  question used to look like one more offer and get lost.
+- **Notebooks claiming less than our leaderboard score leave the queue.** A public notebook
+  whose claimed LB score is below our best submission can at best reproduce a worse score, so
+  the ranking (every loop's) now skips it; Hypotheses marks it **below our LB · skipped**, and
+  pinning it still runs it. Ideas you added yourself are never skipped. On Name that LLM (best
+  LB 0.711) this drops 47 notebooks claiming 0.70 or less, including the one at the top.
+- **A submission refused because Kaggle is still scoring the last one says so.** Some
+  competitions rerun each submission for hours (Gemma's take 12 or more) and refuse a new one
+  until the last is scored, while "1 of 1 left today" said one was free. Gemma's R70 was
+  refused three times, and R45 twice, while R65, R37 or R36 were still scoring; the error
+  just said "400, no reason given". Now the refusal names the submission still scoring, and
+  submission offers warn while one is pending. File uploads, like notebooks, also go through
+  Kaggle's API now, so any reason Kaggle gives is kept.
+- **A refused notebook submission says Kaggle's reason.** The `kaggle` CLI printed only
+  "400 Client Error" (Enveda R53, four times). Notebook submissions now go through Kaggle's API
+  in the same single request, which keeps the reason Kaggle gives; the CLI is the fallback.
+- **Offers for notebooks that wrote no submission file are withdrawn even when Kaggle
+  rate-limits the check.** Enveda's R49 and R52 stayed offered because listing their large
+  outputs kept failing (429); the round's own record, written when it was collected, now
+  settles it.
+
 ## 0.4.8 — Failed submissions become fix rounds, and watchers update themselves (2026-11-20)
 
 - **A submission Kaggle fails becomes a fix round, first in Up next.** When Kaggle fails one

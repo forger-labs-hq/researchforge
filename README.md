@@ -216,7 +216,7 @@ Winners become the starting point for the next round, independent wins are merge
 | **[You approve what matters](https://www.researchforgehq.com/docs/submissions)** | **Approve & submit** sends a Kaggle round only after your click, checks Kaggle's daily limit first and never sends a round twice. Repository plans wait for **Approve plan**, where you type `approve`. Shipping a winner is `researchforge ship`. |
 | **Steer it like a chat** | "Stop tuning LightGBM, try a transformer": a direction for the next round, the next few, or every round, with the proposer's reply under it. **Up next** is one numbered queue: your directions first (newest on top), then ideas you pin, then the engine's own ranking; move any of them with ↑/↓ or drag. A **Next round** banner says what #1 is and when it starts. The next round must follow #1 or say why it can't. Rounds that followed you are marked 🧭 on Runs, DAG and Hypotheses; each one that wrote a submission file gets a Submit? offer, even if it did not beat the best, and those offers sit at the top of 🔔. Pause, resume, add an idea or rebuild the idea pool from the same page. |
 | **Failed submissions fix themselves** | When Kaggle fails a submission (a timeout on the hidden test set, out of memory, a wrong file), a 🔧 fix round goes to the top of Up next with Kaggle's reason and the run log. It must print `FIX_CHECK: passed <evidence>` before it is offered for submission, first in 🔔. Two tries, then it asks you. |
-| **[Questions & notifications](https://www.researchforgehq.com/docs/notifications)** | When the loop needs you, it asks on your phone (ntfy), in the dashboard's 🔔 and on Home. Questions are grouped by competition, and submission offers show how many submissions are left today. An answer that names a settings change (⚙) applies it to Run configs when you pick it, never on its own. Only the ideas a question names wait. Every answer takes a comment that the next proposal follows. A morning briefing sums up the night. |
+| **[Questions & notifications](https://www.researchforgehq.com/docs/notifications)** | 🔔 has two tabs: **Needs you** (what the loop waits on) and **Submit?** (offers, nothing sent without your yes). When the loop needs you, it asks on your phone (ntfy), in the dashboard's 🔔 and on Home. Questions are grouped by competition, and submission offers show how many submissions are left today. An answer that names a settings change (⚙) applies it to Run configs when you pick it, never on its own. Only the ideas a question names wait. Every answer takes a comment that the next proposal follows. A morning briefing sums up the night. |
 | **Runs with nothing open** | Auto-run for competitions and repositories: launches run back to back (the next within 10 minutes), up to 20 rounds a day by default, with a time limit per launch and a wait for the driver's usage limit to reset. Questions waiting for you never stop it. |
 | **Background checks** | Public notebooks every hour (ranked by the score their author claims), new arXiv papers, your submissions being scored, stuck rounds, and your own shell checks. |
 | **Keeps your Kaggle score current** | Public notebooks that claim a better score than yours are tried first: adopted or merged as measured rounds on your compute, then offered to you as submissions. Auto-run builds on them with your directions, arXiv papers and its own results. Nothing from a notebook runs on your machine, and nothing is submitted without **Approve & submit**. |
@@ -313,6 +313,13 @@ Claude Code can also install these as a plugin: `/plugin marketplace add forger-
 - **Everything is inspectable** in `.researchforge/` and `.overnight_<name>/`.
 
 This protects your checkout from a bad patch. It is not a sandbox for hostile code: use Docker mode for code you didn't write.
+
+# Plugins
+
+Installed packages can add commands, dashboard pages, dashboard API routes and monitor hooks
+through the `researchforge.plugins` entry point. `researchforge plugins` lists what is
+installed. With no plugin installed, nothing changes. See
+[writing a plugin](https://github.com/forger-labs-hq/researchforge/blob/main/docs/plugins.md).
 
 # Learn more
 

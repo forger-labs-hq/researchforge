@@ -16,6 +16,10 @@ Order, most important first:
    notebooks 0.49+), so a notebook well ahead of us is the next thing to try;
 3. how measurable the change is locally (``blind`` ideas need a Kaggle GPU run);
 4. the watcher's relevance tag — extend what works, re-tread failures last.
+
+A notebook claiming a public-LB score *below* our best submission is left out
+(:func:`below_our_lb`): running it can at best reproduce a worse score. The person
+can still pin it, and ideas they added themselves are never left out.
 """
 
 from __future__ import annotations
@@ -137,6 +141,22 @@ def claim_gap(h: dict[str, Any], our_best: float | None, direction: str) -> floa
     return round(gap, 6)
 
 
+def _below(h: dict[str, Any], gap: float | None) -> bool:
+    return gap is not None and gap < 0 and h.get("source") != "user"
+
+
+def below_our_lb(artifacts_dir: Path, direction: str) -> set[str]:
+    """Untested ideas left out of the ranking: notebooks claiming less than our best LB."""
+    our_best = our_best_public_lb(artifacts_dir, direction)
+    if our_best is None:
+        return set()
+    return {
+        str(h.get("idea"))
+        for h in load_pool(artifacts_dir)
+        if not h.get("tested") and _below(h, claim_gap(h, our_best, direction))
+    }
+
+
 def rank_untested(
     artifacts_dir: Path, direction: str, *, blocked: set[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -168,6 +188,8 @@ def rank_untested(
         if gap is not None:
             entry["claim_vs_our_best"] = gap
             entry["our_best_lb"] = our_best
+        if _below(h, gap) and idea_key(idea) not in pins:
+            continue
         tier, within = (1 if h.get("source") == "user" else 2), 0.0
         if gap is not None and gap > 0:
             within = -gap

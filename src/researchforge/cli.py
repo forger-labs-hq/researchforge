@@ -31,6 +31,8 @@ from researchforge.generate import generate_app
 from researchforge.hypotheses.cli import hypotheses_app
 from researchforge.kaggle.cli import kaggle_app
 from researchforge.notifications.cli import notify_app
+from researchforge.plugins import register_cli as _register_plugin_cli
+from researchforge.plugins.cli import plugins_command
 from researchforge.project.cli import project_app
 from researchforge.reporting.cli import report_app
 from researchforge.reporting.dashboard_cli import dashboard_command
@@ -696,6 +698,12 @@ def status(json_output: JsonOption = False) -> None:
         typer.echo(f"Created:    {project.created_at.isoformat()}")
         typer.echo(f"Updated:    {project.updated_at.isoformat()}")
         typer.echo(f"Next:       {next_action}")
+
+
+app.command("plugins", rich_help_panel=INTEGRATIONS)(plugins_command)
+
+# Installed plugins add their commands last, so a built-in name always wins the help.
+_register_plugin_cli(app)
 
 
 def main() -> None:

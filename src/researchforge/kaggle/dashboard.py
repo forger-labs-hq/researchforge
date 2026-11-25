@@ -65,6 +65,17 @@ def _keys_fingerprint(rows: list[dict[str, Any]]) -> str:
     )
 
 
+def _plugins_payload() -> dict[str, Any]:
+    """Installed plugins' nav views and load errors, for the app shell."""
+    from researchforge import plugins
+
+    return {
+        "installed": [{"name": lp.name, "version": lp.version} for lp in plugins.load_plugins()],
+        "views": plugins.dashboard_views(),
+        "errors": [asdict(e) for e in plugins.errors()],
+    }
+
+
 def collect_all(cwd: Path | None = None) -> dict[str, Any]:
     """Return the canonical dashboard payload (used by ``--json``)."""
     return _state.build_state(cwd or Path.cwd())
@@ -115,6 +126,7 @@ class DashboardService:
                     "started_at": self.started_at,
                     "cwd": str(self.cwd),
                 }
+                payload["plugins"] = _plugins_payload()
                 self._state, self._state_at = payload, time.time()
             return self._state
 
@@ -274,89 +286,28 @@ class DashboardService:
 
     def action_answer(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         """Answer one open question from the bell or the Home page."""
-        from researchforge.kaggle import control
+        from researchforge.plugins import facade
 
-        qid, answer = str(body.get("id") or ""), str(body.get("answer") or "").strip()
-        where = str(body.get("where") or "kaggle")
-        if not qid or not (answer or body.get("dismiss")):
-            raise ValueError("id and answer are required")
-        if where == "kaggle":
-            if not project.get("overnight"):
-                raise ValueError("this project has no overnight loop")
-            d = Path(project["overnight"]["artifacts_dir"])
-        else:
-            d = Path(project["root"]) / ".researchforge"
-        item = next((q for q in control.open_interactions(d) if q.id == qid), None)
-        if item is None:
-            raise KeyError(f"no open question {qid}")
-        comment = str(body.get("comment") or "")
-        if body.get("dismiss"):
-            control.dismiss(d, qid, "dismissed on the dashboard", comment)
-            return {"dismissed": qid}
-        if item.answer_key.startswith("judge:"):
-            from researchforge.autorun.kaggle_mode import record_decision
-
-            if answer not in ("yes", "no", "skip"):
-                raise ValueError("answer must be yes, no or skip")
-            record_decision(d, item.answer_key[6:], answer)  # type: ignore[arg-type]
-            if comment:
-                items = control.load_interactions(d)
-                for i in items:
-                    if i.id == qid:
-                        i.comment = comment.strip()
-                control._save_interactions(d, items)
-        elif item.kind == "submission_approval" and where == "kaggle":
-            from researchforge.kaggle.submission import answer as answer_submission
-
-            line = answer_submission(d, str(project.get("slug") or ""), qid, answer, comment)
-            return {"answered": qid, "answer": answer, "output": line}
-        else:
-            applied = control.respond(d, qid, answer, comment).applied
-            return {"answered": qid, "answer": answer, "applied": applied}
-        return {"answered": qid, "answer": answer}
+        return facade.answer_question(
+            project,
+            str(body.get("id") or ""),
+            str(body.get("answer") or ""),
+            str(body.get("comment") or ""),
+            "kaggle" if str(body.get("where") or "kaggle") == "kaggle" else "repo",
+            dismiss=bool(body.get("dismiss")),
+        )
 
     def action_plan_approve(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        """Approve or reject a repo plan for the person, with their comment.
+        """Approve or reject a repo plan for the person, with their comment."""
+        from researchforge.plugins import facade
 
-        Approving needs the typed word "approve" — the same as `researchforge
-        experiment approve`. Refused for a competition, whose only engine is its
-        Kaggle loop. Rejecting cancels the plan.
-        """
-        from researchforge.kaggle import control
-        from researchforge.kaggle.dashboard_state import _plans_awaiting_approval
-
-        plan_id = str(body.get("plan") or "")
-        decision = str(body.get("decision") or "approve")
-        comment = str(body.get("comment") or "")
-        if project.get("overnight"):
-            raise ValueError(
-                "this competition runs only on its Kaggle loop; repo plans are not run for it"
-            )
-        repo_dir = Path(project["root"]) / ".researchforge"
-        if plan_id not in _plans_awaiting_approval(repo_dir):
-            raise KeyError(f"{plan_id} is not waiting for approval")
-        if decision == "approve":
-            if str(body.get("typed") or "").strip().lower() != "approve":
-                raise ValueError('type "approve" to approve a plan')
-            cmd = ["experiment", "approve", plan_id, "--yes"]
-        elif decision == "reject":
-            cmd = ["experiment", "cancel", plan_id, "--yes"]
-        else:
-            raise ValueError("decision must be approve or reject")
-        env = {k: v for k, v in os.environ.items() if not k.startswith("RESEARCHFORGE_AUTO")}
-        proc = subprocess.run(
-            [sys.executable, "-m", "researchforge", *cmd],
-            cwd=project["root"],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+        return facade.decide_plan(
+            project,
+            str(body.get("plan") or ""),
+            str(body.get("decision") or "approve"),
+            str(body.get("typed") or ""),
+            str(body.get("comment") or ""),
         )
-        if proc.returncode != 0:
-            raise ValueError((proc.stdout + proc.stderr).strip()[-300:] or f"{decision} failed")
-        control.record_plan_feedback(repo_dir, plan_id, decision, comment)
-        return {"plan": plan_id, "decision": decision, "output": proc.stdout.strip()[-300:]}
 
     def action_repo_auto(self, project: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         """Unattended auto-run of a repo project: settings, approval, launches, service.
@@ -980,14 +931,45 @@ def make_handler(service: DashboardService, port: int) -> Any:
                 # Same-origin only (no CORS headers): lets an open tab pick up the
                 # token of a restarted server without exposing it to other sites.
                 return self._json(payload, headers={"ETag": tag, "X-RF-Token": service.token})
+            if path.startswith("/plugins/"):
+                return self._plugin("GET")
             return self._json({"ok": False, "error": "not found"}, 404)
 
         do_HEAD = do_GET
+
+        def _plugin(self, method: str) -> None:
+            """Serve a plugin route mounted at /plugins/<name>/<path>."""
+            from researchforge import plugins
+
+            url = urllib.parse.urlparse(self.path)
+            name, _, rest = url.path[len("/plugins/") :].partition("/")
+            route = plugins.find_route(name, method, "/" + rest)
+            if route is None:
+                return self._json({"ok": False, "error": "not found"}, 404)
+            body = b""
+            if method == "POST":
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n) if n else b""
+            request = plugins.PluginRequest(
+                method=method,
+                path="/" + rest,
+                query=urllib.parse.parse_qs(url.query),
+                body=body,
+                headers=dict(self.headers.items()),
+                token=service.token,
+            )
+            try:
+                response = route.handler(request)
+            except Exception as exc:
+                return self._json({"ok": False, "error": f"plugin {name}: {exc}"}, 500)
+            return self._send(response.status, response.payload(), response.content_type)
 
         def do_POST(self) -> None:  # noqa: N802
             if not self._host_ok() or self.headers.get("X-RF-Token") != service.token:
                 return self._json({"ok": False, "error": "forbidden"}, 403)
             path = urllib.parse.urlparse(self.path).path
+            if path.startswith("/plugins/"):
+                return self._plugin("POST")
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}

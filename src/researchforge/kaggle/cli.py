@@ -440,6 +440,13 @@ def monitor_cmd(
             status, detail, error = _sensors.run_custom(spec, artifacts_dir.parent)
             _sensors.record(state, name, status, detail, error)
 
+        # ── 9. Installed plugins' monitor hooks, recorded like sensors ──────
+        from researchforge.plugins import MonitorEvent, run_monitor_hooks
+
+        event = MonitorEvent("kaggle", artifacts_dir.parent, artifacts_dir, slug)
+        for name, status, detail in run_monitor_hooks(event):
+            _sensors.record(state, name, status, detail, detail if status == "error" else "")
+
         now = datetime.now()
         state["last_cycle_at"] = now.isoformat(timespec="seconds")
         state["poll_hours"] = poll_hours

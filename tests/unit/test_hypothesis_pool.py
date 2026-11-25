@@ -67,9 +67,10 @@ class TestRanking:
             "repeat",  # claims the most over our best LB: a leaderboard lead outranks relevance
             "big claim",
             "small claim",
-            "behind us",  # its claim is below our best, so it does not lead
             "gpu-only",  # blind: needs a Kaggle GPU run, so last
         ]
+        # "behind us" claims less than our best LB: it can at best reproduce a worse score.
+        assert hp.below_our_lb(d, "maximize") == {"behind us"}
         big = ranked[2]
         assert big["claim_vs_our_best"] == pytest.approx(0.314)
         assert big["our_best_lb"] == 0.166

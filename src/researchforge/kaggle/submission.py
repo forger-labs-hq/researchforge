@@ -17,6 +17,7 @@ import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from researchforge.kaggle.workspace import atomic_write_json, read_json
@@ -92,6 +93,27 @@ def recover_notebook_file(artifacts_dir: Path, round_num: int) -> bool | None:
     return True
 
 
+def _collected_without_file(artifacts_dir: Path, round_num: int) -> bool:
+    """Whether collecting this notebook round found no submission file in its output.
+
+    The collector downloads the run's log and any ``submission.*`` and records
+    ``NO_SUBMISSION_REASON`` when the second is missing, so the record is enough when
+    Kaggle will not list the output again (it rate-limits notebooks with large ones).
+    """
+    import sqlite3
+
+    from researchforge.kaggle.benchmark_runner import NO_SUBMISSION_REASON
+
+    db = artifacts_dir / "experiment_log.db"
+    if not db.exists():
+        return False
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT rejected_reason FROM experiments WHERE round_num = ?", (round_num,)
+        ).fetchone()
+    return bool(row) and str(row[0] or "").startswith(NO_SUBMISSION_REASON)
+
+
 def withdraw_unsubmittable(artifacts_dir: Path) -> list[int]:
     """Close open submission questions for notebook rounds that wrote no submission file.
 
@@ -108,7 +130,10 @@ def withdraw_unsubmittable(artifacts_dir: Path) -> list[int]:
         num = round_of(item.answer_key, item.question)
         if num is None or submittable(artifacts_dir, num):
             continue
-        if recover_notebook_file(artifacts_dir, num) is not False:
+        found = recover_notebook_file(artifacts_dir, num)
+        if found is None and _collected_without_file(artifacts_dir, num):
+            found = False  # Kaggle rate-limits the listing; the collection already looked
+        if found is not False:
             continue  # found one, Kaggle could not be read, or not a notebook round
         control.dismiss(
             artifacts_dir,
@@ -597,14 +622,79 @@ def submit_round(artifacts_dir: Path, slug: str, round_num: int, title: str) -> 
         lock.unlink(missing_ok=True)
 
 
-def _submit(artifacts_dir: Path, slug: str, round_num: int, title: str) -> str:
-    message = f"RF R{round_num}: {title}"[:200]
-    cmd = submit_command(artifacts_dir, slug, round_num, message)
+# A submission through Kaggle's Python API: the CLI prints only "400 Client Error" when
+# Kaggle refuses one, while the response body says why. A notebook (kernel given) or a file.
+_SUBMIT_SNIPPET = """
+import json, sys
+from kaggle.api.kaggle_api_extended import KaggleApi
+slug, kernel, version, file_name, message = sys.argv[1:6]
+api = KaggleApi()
+api.authenticate()
+try:
+    if kernel:
+        api.competition_submit_code(
+            file_name, message, slug, kernel, int(version) if version else None, quiet=True
+        )
+    else:
+        api.competition_submit(file_name, message, slug, quiet=True)
+    print("RF_OK")
+except Exception as exc:
+    resp = getattr(exc, "response", None)
+    body = getattr(resp, "text", "") if resp is not None else ""
+    print("RF_ERR " + json.dumps({"error": str(exc), "body": str(body)[:2000]}))
+"""
+
+
+def still_scoring(artifacts_dir: Path) -> str:
+    """The submission Kaggle is still scoring ("R65, submitted 21 h ago"), or ""."""
+    snap = read_json(artifacts_dir / "submissions.json", {}) or {}
+    for x in snap.get("submissions", []) if isinstance(snap, dict) else []:
+        if not isinstance(x, dict) or "pending" not in str(x.get("status", "")).lower():
+            continue
+        m = _ROUND_IN_DESCRIPTION.search(str(x.get("description") or ""))
+        what = f"R{m.group(1) or m.group(2)}" if m else "an earlier submission"
+        try:
+            sent = datetime.fromisoformat(str(x.get("date") or "")[:19])
+            hours = (datetime.now(UTC).replace(tzinfo=None) - sent).total_seconds() / 3600
+            return f"{what}, submitted {hours:.0f} h ago"
+        except ValueError:
+            return what
+    return ""
+
+
+def _send(cmd: list[str], slug: str) -> tuple[int, str]:
+    """Send the submission once. Returns (exit code, what Kaggle said)."""
+    if "-f" in cmd:
+        from researchforge.kaggle.competition_reader import run_on_kaggle_python
+
+        def arg(flag: str) -> str:
+            return cmd[cmd.index(flag) + 1] if flag in cmd else ""
+
+        out = run_on_kaggle_python(
+            _SUBMIT_SNIPPET, slug, arg("-k"), arg("-v"), arg("-f"), arg("-m"), timeout=600
+        )
+        for line in reversed(out.splitlines()):
+            if line.startswith("RF_OK"):
+                return 0, f"Successfully submitted to {slug}"
+            if line.startswith("RF_ERR "):
+                err = json.loads(line[7:])
+                body = str(err.get("body") or "").strip()
+                return 1, str(err.get("error") or "") + (
+                    f" | Kaggle's reason: {body}" if body else ""
+                )
+        # The API could not be reached at all (no `kaggle` Python): nothing was sent yet.
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError(f"kaggle submit did not run: {exc}") from None
-    reply = (proc.stdout + proc.stderr).strip()
+    return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+
+def _submit(artifacts_dir: Path, slug: str, round_num: int, title: str) -> str:
+    message = f"RF R{round_num}: {title}"[:200]
+    cmd = submit_command(artifacts_dir, slug, round_num, message)
+    code, reply = _send(cmd, slug)
+    proc = SimpleNamespace(returncode=code)
     # The kaggle CLI exits 0 on some refusals (e.g. the daily limit): read its words too.
     refused = re.search(r"\b(error|forbidden|exceeded|not allowed|failed)\b", reply, re.I)
     if proc.returncode != 0 or (refused and "Successfully" not in reply):
@@ -621,6 +711,19 @@ def _submit(artifacts_dir: Path, slug: str, round_num: int, title: str) -> str:
         limit = _limit_reached(artifacts_dir)
         if limit and re.search(r"\b400\b|limit|exceeded", said, re.I):
             raise ValueError(limit)
+        reason = said.split("Kaggle's reason:")[-1].strip() if "Kaggle's reason:" in said else ""
+        busy = still_scoring(artifacts_dir)
+        if busy and re.search(r"\b400\b", said):
+            # Seen on Kaggle competitions that rerun each submission for hours: a new one is
+            # refused until the last is scored.
+            raise ValueError(
+                f"Kaggle refused R{round_num} while it is still scoring {busy}. This "
+                "competition takes one submission at a time: approve again once that one has "
+                "its score (the offer stays open)."
+                + (f" Kaggle said: {reason[:300]}" if reason else "")
+            )
+        if reason:
+            raise ValueError(f"Kaggle refused R{round_num}: {reason[:400]}")
         if re.search(r"\b400\b", said):
             raise ValueError(
                 f"Kaggle refused R{round_num} (400 Bad Request, with no reason given). The "

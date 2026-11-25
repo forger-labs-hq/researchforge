@@ -656,3 +656,27 @@ class TestDashboardEndpoints:
         assert rows["idea one"]["steered"] == []
         assert post({"op": "unpin", "id": two})[0] == 200 and pool.pinned(d) == []
         assert post({"op": "pin", "id": "p-nope"})[0] == 400
+
+
+def test_notebooks_claiming_less_than_our_lb_leave_the_queue(tmp_path: Path) -> None:
+    from researchforge.kaggle import hypothesis_pool as pool
+
+    d = _overnight(tmp_path)
+    (d / "pending_hypotheses.json").write_text(
+        json.dumps(
+            [
+                {"idea": "nb 0.70", "source": "kernel_watcher", "claimed_score": 0.70},
+                {"idea": "nb 0.75", "source": "kernel_watcher", "claimed_score": 0.75},
+                {"idea": "my 0.60 idea", "source": "user", "claimed_score": 0.60},
+                {"idea": "no claim", "source": "kernel_watcher"},
+            ]
+        )
+    )
+    (d / "submissions.json").write_text(
+        json.dumps({"submissions": [{"status": "COMPLETE", "publicscore": "0.711"}]})
+    )
+    ranked = [h["idea"] for h in pool.rank_untested(d, "maximize", blocked=set())]
+    assert "nb 0.70" not in ranked and ranked[:2] == ["my 0.60 idea", "nb 0.75"]
+    assert pool.below_our_lb(d, "maximize") == {"nb 0.70"}
+    pool.pin(d, "nb 0.70")  # the person can still run it
+    assert pool.rank_untested(d, "maximize", blocked=set())[0]["idea"] == "nb 0.70"

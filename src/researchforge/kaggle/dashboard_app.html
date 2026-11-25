@@ -202,7 +202,7 @@ function parseHash() {
   const h = location.hash.replace(/^#\/?/, "");
   const [view, qs] = h.split("?");
   const p = new URLSearchParams(qs || "");
-  return { view: VIEWS.some(v => v[0] === view) ? view : "home", p: p.get("p") || "all", n: p.get("n") || "", q: p.get("q") || "" };
+  return { view: VIEWS.some(v => v[0] === view) || view.startsWith("plugin/") ? view : "home", p: p.get("p") || "all", n: p.get("n") || "", q: p.get("q") || "" };
 }
 function hashOf(r) {
   const p = new URLSearchParams();
@@ -365,7 +365,7 @@ function renderChrome() {
     configs: ps.filter(p => p.overnight && p.role === "primary").length,
     submissions: ps.reduce((a, p) => a + p.submissions.items.length, 0),
   } : {};
-  document.getElementById("nav").innerHTML = VIEWS.map(([k, label]) =>
+  document.getElementById("nav").innerHTML = allViews().map(([k, label]) =>
     `<div class="nav${S.route.view === k ? " active" : ""}" data-act="nav" data-view="${k}"><span>${label}</span><span class="count">${counts[k] ?? ""}</span></div>`).join("");
   const sel = document.getElementById("project-select");
   // A project waiting on you is still live (its watcher keeps running), so it is never "Idle".
@@ -385,12 +385,24 @@ function renderChrome() {
   sel.innerHTML = opts.join("");
   sel.value = S.route.p !== "all" && byId(S.route.p) ? S.route.p : "all";
   document.getElementById("show-copies").checked = S.showCopies;
-  const v = VIEWS.find(v => v[0] === S.route.view);
+  const v = allViews().find(v => v[0] === S.route.view);
   document.getElementById("view-title").textContent = v ? v[1] : "Home";
   const cur = S.route.p !== "all" ? byId(S.route.p) : null;
   document.getElementById("crumb").innerHTML = cur ? `${esc(cur.name)} <span class="dim">· ${shortPath(cur.location)}</span>` :
     (S.route.p !== "all" && S.data ? `<span style="color:var(--amber)">Selected project no longer on disk</span>` : "");
   document.title = (cur ? cur.name + " · " : "") + (v ? v[1] : "Home") + " · ResearchForge";
+}
+
+// ── Plugin views: installed plugins add nav entries showing their own pages. ──
+function pluginViews() { return (S.data && S.data.plugins && S.data.plugins.views) || []; }
+function allViews() { return VIEWS.concat(pluginViews().map(v => [v.key, v.label])); }
+function vPlugin(el) {
+  // The page keeps its own state: reload it only when another plugin view is chosen.
+  const v = pluginViews().find(v => v.key === S.route.view);
+  if (!v) { el.innerHTML = `<div class="empty">This plugin view is not installed any more.</div>`; return; }
+  const f = el.querySelector("iframe.plugin-view");
+  if (f && f.dataset.key === v.key) return;
+  el.innerHTML = `<iframe class="plugin-view" data-key="${esc(v.key)}" src="${esc(v.url)}" title="${esc(v.label)}" style="width:100%;height:calc(100vh - 140px);border:0;background:transparent"></iframe>`;
 }
 
 function render(viewChanged) {
@@ -402,6 +414,7 @@ function render(viewChanged) {
   const el = document.getElementById("content");
   if (!S.data) return;
   const keep = viewChanged ? (S.scroll[S.route.view] || 0) : el.scrollTop;
+  if (S.route.view.startsWith("plugin/")) { vPlugin(el); tick(); return; }
   const fn = { home: vHome, steer: vSteer, new: vNew, keys: vKeys, configs: vConfigs, automation: vAutomation, runs: vRuns, dag: vDag, hypotheses: vHyp, submissions: vSubs, timeline: vTimeline, insights: vInsights }[S.route.view];
   let html;
   try { html = fn(); } catch (e) { html = `<div class="issue error">Render error in ${esc(S.route.view)}: ${esc(e.message)}</div>`; console.error(e); }
@@ -810,11 +823,14 @@ function dailyLeft(p) {
 }
 function dailyNote(p) {
   const d = p.submissions && p.submissions.daily;
-  if (!d) return "";
+  // Competitions that rerun each submission for hours refuse a new one until the last is scored.
+  const busy = ((p.submissions && p.submissions.items) || []).find(s => s.status === "pending");
+  const wait = busy ? `<div class="sub" style="margin:2px 0 4px;color:var(--amber)">Kaggle is still scoring ${esc(((busy.description || "").match(/\bR\d+\b/) || ["an earlier submission"])[0])} (sent ${when(busy.date)}). This competition may refuse a new submission until it has its score.</div>` : "";
+  if (!d) return wait;
   const resets = new Date(d.resets_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return d.remaining > 0
+  return wait + (d.remaining > 0
     ? `<div class="sub" style="margin:2px 0 4px">${dailyLeft(p)} on Kaggle (resets ${esc(resets)})</div>`
-    : `<div class="sub" style="margin:2px 0 4px;color:var(--amber)">Kaggle's daily limit is used up${d.after_round ? ` (0 left after R${esc(d.after_round)})` : ""}. Approving now is refused; it resets at ${esc(resets)}.</div>`;
+    : `<div class="sub" style="margin:2px 0 4px;color:var(--amber)">Kaggle's daily limit is used up${d.after_round ? ` (0 left after R${esc(d.after_round)})` : ""}. Approving now is refused; it resets at ${esc(resets)}.</div>`);
 }
 function questionCard(p, q, pre = "qa") {
   const k = `${p.id}:${q.where}:${q.id}`, busy = S.busy.has("q:" + k);
@@ -862,16 +878,26 @@ function questionGroup(g, pre, only) {
   const head = only ? "" : `<button class="qhead" data-act="q-group" data-key="${esc(key)}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span>${fresh ? '<span class="new" title="new"></span>' : ""}<b>${esc(p.name)}</b><span class="sub">${esc(bits)}</span></button>`;
   return head + (open ? g.map(({ q }) => questionCard(p, q, pre)).join("") : "");
 }
+// Submission offers pile up; a question the loop needs answered must not get lost among them.
+const isOffer = x => x.q.kind === "submission_approval";
+function bellTab(needs, offers) { const t = S.chips.bell; return t === "offers" || t === "needs" ? t : needs.length ? "needs" : "offers"; }
+function bellTabs(needs, offers, tab) {
+  return `<div class="chips" style="margin:6px 10px">${[["needs", `Needs you (${needs.length})`, needs.length ? "color:var(--red)" : ""], ["offers", `Submit? (${offers.length})`, ""]].map(([k, l, st]) => `<span class="chip${tab === k ? " on" : ""}" style="${st}" data-act="chip" data-group="bell" data-val="${k}">${l}</span>`).join("")}</div>`;
+}
 function renderInbox() {
-  const items = questionsOf(allProjects()), fresh = items.filter(x => isNewQ(x.q)).length;
+  const items = questionsOf(allProjects()), needs = items.filter(x => !isOffer(x)), offers = items.filter(isOffer);
+  const fresh = items.filter(x => isNewQ(x.q)).length;
   const n = document.getElementById("bell-n");
-  n.hidden = !items.length; n.textContent = items.length; n.className = "n" + (fresh ? "" : " old");
-  document.getElementById("bell").title = items.length ? `${plural(items.length, "question")} waiting for you${fresh ? ` (${fresh} new)` : ""}` : "No questions waiting";
+  // The badge counts what needs you (red); with nothing but offers it shows those, grey.
+  n.hidden = !items.length; n.textContent = needs.length || offers.length; n.className = "n" + (needs.length ? "" : " old");
+  document.getElementById("bell").title = items.length ? `${plural(needs.length, "question")} need you · ${plural(offers.length, "submission offer")}${fresh ? ` (${fresh} new)` : ""}` : "No questions waiting";
   const box = document.getElementById("inbox");
   box.hidden = !S.inboxOpen;
   const typing = document.activeElement && document.activeElement.tagName === "INPUT" && document.activeElement.dataset.ans;
   if (!S.inboxOpen || typing) return;  // never wipe a half-typed answer
-  box.innerHTML = `<div class="hd title" style="padding:10px 12px">Questions for you <span class="sub">answering one lets its ideas run again</span><button class="right" data-act="bell" aria-label="Close">✕</button></div>` + questionsHtml(items, "Nothing is waiting for you.");
+  const tab = bellTab(needs, offers);
+  box.innerHTML = `<div class="hd title" style="padding:10px 12px">For you <button class="right" data-act="bell" aria-label="Close">✕</button></div>` + bellTabs(needs, offers, tab)
+    + (tab === "needs" ? questionsHtml(needs, "Nothing needs you: the loop is not waiting on any answer.") : questionsHtml(offers, "No submission offers."));
 }
 
 // ── Home ───────────────────────────────────────────────────────────────────
@@ -907,9 +933,14 @@ function vHome() {
   ];
   let h = `<div class="grid g4 mb">${tiles.map(([l, v, c, s]) => `<div class="card stat"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div><div class="dim" style="font-size:11px">${esc(s)}</div></div>`).join("")}</div>`;
   const qs = questionsOf(ps).filter(x => match(x.p.name, x.q.question));
-  if (qs.length) {
-    const fresh = qs.filter(x => isNewQ(x.q)).length;
-    h += `<div class="card mb"><div class="hd title">Questions for you <span class="sub">${plural(qs.length, "question")}${fresh ? ` · <span style="color:var(--red)">${fresh} new</span>` : ""} — answering one lets its ideas run again</span></div>${questionsHtml(qs, "", "qh")}</div>`;
+  const needs = qs.filter(x => !isOffer(x)), offers = qs.filter(isOffer);
+  if (needs.length) {
+    const fresh = needs.filter(x => isNewQ(x.q)).length;
+    h += `<div class="card mb" style="border-color:var(--red)"><div class="hd title" style="color:var(--red)">⛔ Needs you <span class="sub">${plural(needs.length, "question")}${fresh ? ` · ${fresh} new` : ""} — the loop or its ideas wait for these</span></div>${questionsHtml(needs, "", "qh")}</div>`;
+  }
+  if (offers.length) {
+    const fresh = offers.filter(x => isNewQ(x.q)).length;
+    h += `<details class="card mb" ${det("home-offers", !needs.length)}><summary><span class="title">Submit? <span class="sub">${plural(offers.length, "submission offer")}${fresh ? ` · <span style="color:var(--red)">${fresh} new</span>` : ""} — nothing is sent without your yes</span></span></summary>${questionsHtml(offers, "", "qo")}</details>`;
   }
 
   const steps = [];
@@ -1390,7 +1421,7 @@ function vHyp() {
       ${claimLine(p, x)}
       ${x.tested_by.length ? `<div class="sub">Tested by: ${x.tested_by.map(id => `<a class="mono" href="${hashOf({ view: "dag", p: p.id, n: id })}">${esc(id)}</a>`).join(", ")}</div>` : ""}
       ${x.refs && x.refs.length ? `<div class="dim mono trunc">${x.refs.map(esc).join(" · ")}</div>` : ""}</div>
-      <div style="text-align:right;flex-shrink:0" class="sub">${x.pin_id && !x.tested && x.status === "untested" ? `<div><button data-act="pin" data-op="${x.pin ? "unpin" : "pin"}" data-id="${p.id}" data-pin="${esc(x.pin_id)}" title="${x.pin ? "Take it out of your Up next queue" : "Try this before the engine's ranking (Steer → Up next)"}">${x.pin ? "Unpin" : "📌 Pin"}</button></div>` : ""}<div>${esc(x.origin)}</div><div>${when(x.created_at)}</div>${x.priority != null ? `<div>p=${esc(x.priority)}</div>` : ""}<div class="mono dim">${esc(x.id)}</div></div></div>`).join("") ||
+      <div style="text-align:right;flex-shrink:0" class="sub">${x.below_lb ? `<div><span class="badge b-gray" title="Its notebook claims a lower public score than our best submission, so the loop skips it. Pin it to run it anyway.">below our LB · skipped</span></div>` : ""}${x.pin_id && !x.tested && x.status === "untested" ? `<div><button data-act="pin" data-op="${x.pin ? "unpin" : "pin"}" data-id="${p.id}" data-pin="${esc(x.pin_id)}" title="${x.pin ? "Take it out of your Up next queue" : "Try this before the engine's ranking (Steer → Up next)"}">${x.pin ? "Unpin" : "📌 Pin"}</button></div>` : ""}<div>${esc(x.origin)}</div><div>${when(x.created_at)}</div>${x.priority != null ? `<div>p=${esc(x.priority)}</div>` : ""}<div class="mono dim">${esc(x.id)}</div></div></div>`).join("") ||
       `<div class="empty">No hypotheses match this filter.</div>`;
     h += `</div></details>`;
     h += kernelBoard(p);  // the public-notebook table, after the ideas the filters act on

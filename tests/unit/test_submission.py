@@ -21,6 +21,8 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RESEARCHFORGE_AUTO_RUN", raising=False)
     monkeypatch.setattr(control, "notify", lambda *a, **k: True)
     monkeypatch.setattr(competition_reader, "_fetch_competition_api", lambda slug: None)
+    # No Kaggle Python API in tests: submissions go through the (mocked) CLI.
+    monkeypatch.setattr(competition_reader, "run_on_kaggle_python", lambda *a, **k: "")
     from researchforge.kaggle import cli as _cli
 
     listed: list[str] = []
@@ -741,3 +743,69 @@ def test_the_monitor_restarts_itself_when_researchforge_is_updated(
     assert ran == []
     cli._reload_if_updated(50.0)
     assert len(ran) == 1  # the same command line, run again on the new code
+
+
+def test_a_refused_notebook_submission_says_kaggles_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from researchforge.kaggle import competition_reader
+
+    d = _project(tmp_path, code=True)
+    monkeypatch.setattr(submission, "is_code_competition", lambda art, slug: True)
+    (tmp_path / "x.csv").write_text("id,y\n")
+    submission.record_round_outputs(
+        d,
+        7,
+        {"kernel_ref": "me/rf-r7", "kernel_version": 1, "submission_file": str(tmp_path / "x.csv")},
+    )
+    sent: list[tuple[str, ...]] = []
+    body = json.dumps({"error": "400 Client Error", "body": "Notebook uses an input not allowed"})
+
+    def api(snippet: str, *args: str, timeout: int = 60) -> str:
+        sent.append(args)
+        return "RF_ERR " + body
+
+    monkeypatch.setattr(competition_reader, "run_on_kaggle_python", api)
+    calls = _fake_kaggle(monkeypatch, "should not be called")
+    with pytest.raises(ValueError, match="Notebook uses an input not allowed"):
+        submission._submit(d, SLUG, 7, "idea")
+    assert len(sent) == 1 and sent[0][:3] == (SLUG, "me/rf-r7", "1") and calls == []
+    assert "Notebook uses an input not allowed" in (d / submission.REFUSED_FILE).read_text()
+
+
+def test_an_offer_is_withdrawn_when_its_collection_found_no_file_and_kaggle_wont_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    from researchforge.kaggle.benchmark_runner import NO_SUBMISSION_REASON
+
+    d = _project(tmp_path, code=True)
+    _log(d, [(52, None, 0, 0), (53, None, 0, 0)], minimize=False)
+    with sqlite3.connect(d / "experiment_log.db") as conn:
+        conn.execute(
+            "UPDATE experiments SET rejected_reason=? WHERE round_num=52", (NO_SUBMISSION_REASON,)
+        )
+    for n in (52, 53):
+        submission.record_round_outputs(d, n, {"kernel_ref": f"me/nb{n}", "kernel_version": 1})
+        _offer(d, n)
+    _notebook_output(monkeypatch, None)  # Kaggle rate-limits the listing (429)
+    assert submission.withdraw_unsubmittable(d) == [52]  # R53's record says nothing either way
+
+
+def test_a_refusal_while_kaggle_still_scores_the_last_one_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    d = _project(tmp_path)
+    sent = (datetime.now(UTC) - timedelta(hours=21)).strftime("%Y-%m-%d %H:%M:%S")
+    pending = {"description": "RF R65: bundle", "date": sent, "status": "SubmissionStatus.PENDING"}
+    (d / "submissions.json").write_text(json.dumps({"submissions": [pending]}))
+    assert submission.still_scoring(d) == "R65, submitted 21 h ago"
+    f = tmp_path / "s.zip"
+    f.write_text("x")
+    submission.record_round_outputs(d, 70, {"submission_file": str(f)})
+    _fake_kaggle(monkeypatch, "400 Client Error: Bad Request for url: …/CreateSubmission", code=1)
+    with pytest.raises(ValueError, match="still scoring R65, submitted 21 h ago.*one submission"):
+        submission._submit(d, SLUG, 70, "retry")

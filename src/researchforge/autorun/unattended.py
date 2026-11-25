@@ -761,6 +761,10 @@ def monitor_cycle(root: Path) -> dict[str, Any]:
         except Exception as exc:
             status, detail = "error", f"{type(exc).__name__}: {exc}"
         _record(state, name, status, detail)
+    from researchforge.plugins import MonitorEvent, run_monitor_hooks
+
+    for name, status, detail in run_monitor_hooks(MonitorEvent("repo", root, d)):
+        _record(state, name, status, detail)
     now = datetime.now()
     state["last_cycle_at"] = now.isoformat(timespec="seconds")
     state["next_cycle_at"] = (now + timedelta(minutes=cfg.poll_minutes)).isoformat(

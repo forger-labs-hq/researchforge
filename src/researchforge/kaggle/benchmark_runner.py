@@ -40,6 +40,8 @@ _NUMBER = r"(-?[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)"
 # round is kept unscored with its file, so it can still be offered for submission
 # (kaggle.submission.offer_missed). Older rounds carry the earlier wordings.
 UNSCORED_REASON = "Ran to the end and wrote a submission file, but printed no score (unscored)"
+# A notebook round whose collected output had neither a score nor a submission file.
+NO_SUBMISSION_REASON = "Kernel completed but no metric found in output files"
 UNSCORED_PATTERN = re.compile(
     r"printed no score \(unscored\)|no metric found in output files|Could not parse metric"
 )
@@ -644,9 +646,7 @@ class BenchmarkRunner:
                 metric_value=baseline_score,
                 metric_improved=False,
                 duration_seconds=duration,
-                error_message=UNSCORED_REASON
-                if written
-                else "Kernel completed but no metric found in output files",
+                error_message=UNSCORED_REASON if written else NO_SUBMISSION_REASON,
                 outputs=outputs,
             )
 

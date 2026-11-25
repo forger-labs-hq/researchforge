@@ -864,10 +864,15 @@ def _read_overnight(d: Path, slug: str, sibling_setups: list[str]) -> dict[str, 
     from researchforge.kaggle.hypothesis_pool import idea_key, pin_id, pinned
 
     pins = {idea_key(str(h["idea"])): h["pin"] for h in pinned(d)}
+    from researchforge.kaggle.hypothesis_pool import below_our_lb
+
+    below = below_our_lb(d, direction)
     for h, raw in zip(hypotheses, (x for x in pool if isinstance(x, dict)), strict=True):
         idea = str(raw.get("idea") or "")
         h["pin_id"] = pin_id(idea) if idea else ""
         h["pin"] = pins.get(idea_key(idea))
+        # Left out of the queue: a notebook claiming less than our best LB (still pinnable).
+        h["below_lb"] = idea in below and h["pin"] is None
     by_round = {e["id"]: e for e in experiments}
     for h in hypotheses:
         for rid in h["tested_by"]:

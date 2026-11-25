@@ -40,6 +40,10 @@ def _isolated_researchforge_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     from researchforge.kaggle import kernel_watcher
 
     monkeypatch.setattr(kernel_watcher, "_max_daily", lambda artifacts_dir: None)
+    # Plugins installed in the dev environment must not change what tests see.
+    from researchforge import plugins
+
+    monkeypatch.setattr(plugins, "_loaded", [])
 
 
 @pytest.fixture
